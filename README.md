@@ -34,6 +34,198 @@ The fire-power color ramp, the intensity and confidence filters, and the heatmap
 
 ---
 
+## Engineering overview
+
+### The problem, in one paragraph
+
+On a wildfire, each operational period produces an **Incident Action Plan (IAP)**. Its **ICS-204 Assignment List** says, per division, which crews and engines are assigned, how many people each has, the task, and the radio channels. It's printed, carried on the line, and corrected by hand, so it's hard to total up or search. **fifi** reads photos of those forms with AI, turns each one into rows in a spreadsheet, flags understaffed resources, and shows the incident on a live national fire map.
+
+### Functional requirements (what it does)
+
+| # | Requirement | Where |
+|---|---|---|
+| F1 | Upload one or many forms by **drag and drop or file browse** (JPG, PNG, WEBP, PDF) | `extract.html` |
+| F2 | **Read the form (OCR + understanding)** with Gemini, including handwriting, into a fixed JSON schema | `ics204_extractor.py` |
+| F3 | **Flatten** each form into one row per resource plus one row per radio channel, all with the same 33 columns | `flatten()` |
+| F4 | **Flag staffing** per resource: `OK`, `CRITICAL`, `NO_PERSONNEL` | `staffing_status()` |
+| F5 | **Preview** results in a table before saving | `extract.html` |
+| F6 | **Download** one combined CSV that opens cleanly in Excel or Google Sheets | `extract.html` (`toCsv`) |
+| F7 | Access with **your own Gemini key** or a **private access link** | `app.py` (`resolve_key`) |
+| F8 | **Retry only the forms that failed** | `extract.html` |
+| F9 | **Live fire map** of incidents, perimeters and satellite hotspots, with filters | `index.html`, `/api/hotspots` |
+| F10 | **Match extracted incidents** to the live map and show your form totals | `index.html` (`matchMine`) |
+| F11 | **Clear** your saved key and map data from the device | both pages |
+
+### Non-functional requirements (how well it does it)
+
+| Quality | Target | Measured / how |
+|---|---|---|
+| **Speed** | Average under 15 s per form | Flash: 5–13 s (about 11 s on a full form). Pro on a dense form: 14–16 s. The live site read a full form in 12 s. |
+| **Reliability** | Never hang; clear errors | Each Gemini call is capped at 240 s (host limit 300 s). Friendly messages for a bad key, rate limit or timeout. |
+| **Security: API key** | Never stored on the server | Sent per request in a header, used once, never logged. The owner's key lives only in host environment variables. |
+| **Security: documents** | Confidential forms never kept | No database. Uploads stay in RAM only (`InMemoryRequest`) and are gone when the request ends. |
+| **Usability** | No install, no account, no training | One page: paste key, drop files, press Extract. Works on phone and desktop. |
+| **Cost** | Owner doesn't pay for strangers | Visitors bring their own key. Only access-link users spend the owner's key. |
+| **Upload limits** | Phone photos just work | Photos are shrunk in the browser to under 4 MB before upload. |
+| **Maintainability** | Small and simple | 2 Python dependencies, 2 HTML pages, no build step. |
+
+Simple wireframe of the extractor page:
+
+```
+┌──────────────────────────────────────────────────┐
+│ 🔥 fifi // fire incident form intelligence   Map │
+├──────────────────────────────────────────────────┤
+│ 1 · YOUR GEMINI API KEY                          │
+│ [ •••••••••••••••••••••••• ] [Show]              │
+│ ☐ Remember on this device   (or: ✓ access link)  │
+├──────────────────────────────────────────────────┤
+│ 2 · UPLOAD ICS-204 FORMS        JPG PNG WEBP PDF │
+│ ┌──────────────────────────────────────────────┐ │
+│ │      📋  Drag & drop forms here, or browse   │ │
+│ └──────────────────────────────────────────────┘ │
+│  div-a.jpg ............ ✓ 23 rows             ×  │
+│  div-b.pdf ............ ⟳ Reading…            ×  │
+│ [Extract data] [Download CSV] [Clear]            │
+├──────────────────────────────────────────────────┤
+│ 3 · EXTRACTED DATA   Forms 2 · Rows 41 · Short 9 │
+│ ┌ incident │ division │ resource │ people │ status│
+│ │ HOPE     │ DIV A    │ E-2102   │ 2      │ OK    │
+└──────────────────────────────────────────────────┘
+```
+
+### SDLC: Agile, in sprints
+
+fifi was built in short sprints. Each one ended with something working that could be shown and judged, especially **what the exported CSV should contain**.
+
+| Sprint | Goal | What changed in the CSV |
+|---|---|---|
+| 1 | Command-line prototype: photos → plain text, then a JSON schema → Excel/CSV | First columns: `source_image`, incident header, resources, `status` |
+| 2 | Batch processing for real forms: rate-limit retries, handwriting flags, confidence scores | Tried `confidence_score`, `requires_human_review` and a 4-level staffing scale |
+| 3 | First web app (Flask): upload, preview, download | Communications rows added (`comm_*` columns) |
+| 4 | Make it safe and fast for the public: bring-your-own key, one form per request, CSV built in the browser | **Fixed 33 columns on every row**; `source_image` → `source_file`; bug fix so 0 people shows `NO_PERSONNEL` |
+| 5 | Deploy (Vercel) plus a private access link for a professor; fix model and speed | No schema change; Flash/Pro split, LOW thinking (10x faster, same output) |
+| 6 | Live fire map, landing page, security section | Map summary built from CSV rows (resources, people, understaffed) |
+
+Each sprint followed **plan → build → test with real forms → review → adjust the backlog**. Example user stories:
+- *As a planning chief, I want one row per resource, so I can sort the whole incident by staffing.*
+- *As a comms unit leader, I want radio channels as their own rows, so I can build a frequency list.*
+- *As a professor, I want a link that just works, so I don't need my own API key.*
+
+### Architecture style: MVP (Model–View–Presenter)
+
+In plain words, the app is split into three jobs:
+
+| Part | Job | In fifi |
+|---|---|---|
+| **Model** | The data and the rules. Knows nothing about screens. | `ics204_extractor.py` (schema, Gemini call, flattening, staffing rules), the API in `app.py`, and the outside data feeds (Gemini, NIFC, NASA FIRMS) |
+| **View** | What you see. Shows things and passes on clicks. No logic. | The HTML and CSS in `public/index.html` and `public/extract.html` (drop zone, table, map, legend) |
+| **Presenter** | The middleman. Reacts to clicks, asks the Model for data, and tells the View what to show. | The JavaScript in each page: handles uploads, calls `/api/extract`, tracks each file's state, filters the map, builds the CSV |
+
+Example: you press **Extract** (View) → the Presenter shrinks the photo and sends it to `/api/extract` → the Model reads it with Gemini and returns rows → the Presenter updates the file list and table (View).
+
+The whole thing is also **client–server** with a **stateless serverless backend**: every request carries everything it needs, and the server remembers nothing afterward. That's what makes the "nothing stored" promise possible.
+
+*(MVP also means "minimum viable product", and fifi started as one: the smallest working tool, then improved sprint by sprint.)*
+
+### UML: how key handling and document security fit together
+
+**Inheritance** is used where it matters most for security. `InMemoryRequest` is a subclass of Werkzeug's `Request` and overrides one method so uploaded files go to RAM instead of a temporary file on disk. Flask is told to use it for every request. Error handling also relies on inheritance: Gemini's `ClientError` is a subclass of `APIError`, so the specific case (bad key, rate limit) is caught first and the general one after.
+
+```mermaid
+classDiagram
+    class Request {
+        <<Werkzeug>>
+        +files
+        +headers
+        #_get_file_stream()
+    }
+    class InMemoryRequest {
+        #_get_file_stream() BytesIO
+    }
+    Request <|-- InMemoryRequest : inherits
+
+    class FlaskApp {
+        +request_class = InMemoryRequest
+        +POST /api/extract
+        +POST /api/access
+        +GET /api/config
+        +GET /api/hotspots
+    }
+    class KeyResolver {
+        +resolve_key()
+        +code_matches()
+        +server_key()
+        +access_code()
+    }
+    class HostEnvironment {
+        <<Vercel env vars>>
+        GOOGLE_API_KEY
+        ACCESS_CODE
+    }
+    class Extractor {
+        +extract_form()
+        +flatten()
+        +staffing_status()
+        +COLUMNS
+    }
+    class GeminiAPI {
+        <<Google>>
+    }
+    class Browser {
+        <<localStorage, optional>>
+        own key
+        access code
+        map summary
+    }
+    class APIError
+    class ClientError
+    APIError <|-- ClientError : inherits
+
+    Browser --> FlaskApp : HTTPS + X-Gemini-Key or X-Access-Code
+    FlaskApp --> InMemoryRequest : parses every upload with
+    FlaskApp --> KeyResolver : which key?
+    KeyResolver --> HostEnvironment : reads owner key and code
+    FlaskApp --> Extractor : form bytes
+    Extractor --> GeminiAPI : bytes + JSON schema
+    FlaskApp ..> ClientError : catches first
+    FlaskApp ..> APIError : then catches
+```
+
+One extraction, step by step:
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as fifi server (Flask)
+    participant G as Google Gemini
+    B->>S: POST /api/extract (form + own key OR access code)
+    S->>S: InMemoryRequest keeps the file in RAM
+    S->>S: resolve_key(): own key, or owner key if the code matches
+    S->>G: form bytes + ICS-204 JSON schema
+    G-->>S: structured fields (JSON)
+    S->>S: flatten() into 33-column rows, staffing flags
+    S-->>B: rows (JSON)
+    Note over S: Request ends: file and key are dropped. Nothing written.
+    B->>B: preview table, build CSV, optional map summary in localStorage
+```
+
+### Languages and tools
+
+| Area | Tools |
+|---|---|
+| **Languages** | Python 3.12 (server), JavaScript (browser logic), HTML and CSS (pages) |
+| **Backend** | Flask (web framework), Werkzeug (request handling, subclassed), `google-genai` SDK (Gemini), `certifi` (HTTPS certificates) |
+| **AI models** | Google Gemini: `gemini-3.8-flash` (visitors' own keys), `gemini-3.1-pro-preview` (access-link users), with structured JSON output |
+| **Map** | MapLibre GL JS 4.7.1, CARTO Dark Matter basemap, Esri World Imagery |
+| **Live data** | NIFC WFIGS (incidents and perimeters, ArcGIS REST), NASA FIRMS VIIRS (satellite hotspots) |
+| **Hosting** | Vercel (serverless Python, CDN, encrypted environment variables, auto-deploy on push) |
+| **Source control** | Git, GitHub |
+| **Dev tools** | Cursor (first version), Claude Code (AI pair programming), VS Code, curl, headless Chrome / Puppeteer (UI checks) |
+| **Fonts** | Space Grotesk, JetBrains Mono (Google Fonts) |
+| **Earlier versions** | pandas, Pillow, openpyxl (removed: the browser now builds the CSV and resizes photos) |
+
+---
+
 ## How it works
 
 1. **Get access, either way:**
@@ -87,7 +279,7 @@ Usage through the link is billed to your Gemini key, so share it only with peopl
 
 ## Deploy
 
-The repo is ready for **[Vercel](https://vercel.com)**: import it at vercel.com/new, add the two environment variables above if you want private access, and deploy. Vercel detects the Flask app in `app.py` and serves the landing page at `/` and the extractor at `/extract`. A form usually takes 10–20 seconds. Each Gemini call is capped at 240 seconds, so a slow response returns a clear "try again" message before Vercel's 300-second limit.
+The repo is ready for **[Vercel](https://vercel.com)**: import it at vercel.com/new, add the two environment variables above if you want private access, and deploy. Vercel detects the Flask app in `app.py` and serves the landing page at `/` and the extractor at `/extract`. A form usually takes 5–16 seconds. Each Gemini call is capped at 240 seconds, so a slow response returns a clear "try again" message before Vercel's 300-second limit.
 
 It also runs on any host that supports Python (Render, Railway, Fly.io, Cloud Run) with `gunicorn app:app`.
 
@@ -134,16 +326,35 @@ Instead of `X-Gemini-Key`, a request can send `X-Access-Code` to use the owner's
 
 ---
 
-## Project structure
+## Project structure: every file and what it's for
 
-```
-app.py               Flask server: pages, /api endpoints, FIRMS relay, in-memory uploads
-ics204_extractor.py  Gemini prompt + JSON schema, and flattening to CSV rows
-public/index.html    Landing page + live fire map (MapLibre)
-public/extract.html  Extractor (upload, key / access link, preview, CSV export)
-vercel.json          Maps /extract to the CDN copy of extract.html on Vercel
-requirements.txt     flask, google-genai
-```
+| File | What it does |
+|---|---|
+| `app.py` | The server. Serves the pages and the API (`/api/extract`, `/api/access`, `/api/config`, `/api/hotspots`). Decides which API key to use, keeps uploads in memory (`InMemoryRequest`), turns Gemini errors into friendly messages, and relays NASA satellite data with a 15-minute cache. |
+| `ics204_extractor.py` | The "brain". The prompt and the ICS-204 JSON schema sent to Gemini, the model settings, `flatten()` (one form → 33-column rows) and the staffing rules. |
+| `public/index.html` | Landing page and live fire map: hero with live numbers, map layers and filters, IAP explainer, security section, FAQ. |
+| `public/extract.html` | The extractor: API key or access link, drag-and-drop upload, browser-side photo resizing, per-file progress, preview table, CSV download. |
+| `vercel.json` | Tells Vercel that `/extract` means `extract.html` (Vercel serves page files from its CDN). |
+| `requirements.txt` | Python dependencies: `flask`, `google-genai`. |
+| `.gitignore` | Keeps secrets (`.env`), private form photos (`input_forms/`) and local tooling out of Git. |
+| `README.md` | This document. |
+| `.env` *(local only, never committed)* | Your Gemini key and access code for running locally. |
+| `input_forms/` *(local only, never committed)* | Sample ICS-204 photos used for testing. They may contain real names, so they stay off GitHub. |
+
+## Technical debt: where AI-written code needs care
+
+Most of the code was written with AI assistance and then reviewed and tested by hand. AI is fast, but it produces code that *looks* right. These are the places to be most careful, roughly in order of risk:
+
+1. **No automated tests.** Everything was tested by hand with real forms and `curl`. Each change risks breaking something silently. **First thing to add:** unit tests for `flatten()` and `staffing_status()`, plus a "golden form" test that checks known values.
+2. **AI reading AI.** Gemini's extraction accuracy has never been measured against hand-typed answers. It looked right on test forms, but a misread personnel count changes a staffing flag. Users must review the CSV.
+3. **Security-sensitive code.** `resolve_key()`, `code_matches()` and `InMemoryRequest` protect keys and documents. `InMemoryRequest` overrides a *private* Werkzeug method (`_get_file_stream`), which a future Flask/Werkzeug update could change silently. Pin versions and re-check after upgrades.
+4. **No rate limiting.** If the access link leaks, anyone can spend the owner's Gemini key until the code is changed. The code is long and random, so it can't be guessed, but nothing slows down repeated use.
+5. **Bugs already caught in review** show why this list matters: an unreachable `NO_PERSONNEL` check, Gemini text inserted into the page unescaped (a cross-site scripting risk), every form sent to Gemini twice (preview, then download), and a wrong assumption that a model was retired (it was only on the beta API).
+6. **Big single files.** Each HTML page holds its CSS and JavaScript inline (the landing page is about 1,000 lines), with no linter or build step. Easy to deploy, harder to change safely.
+7. **Fragile outside dependencies.** A preview Gemini model can be retired, the NIFC field names can change, and loose version ranges (`flask>=3.0`) can pull in breaking updates.
+8. **Heuristics.** Matching a form to the live map uses the incident name only, so two fires with similar names could match wrongly. The hotspot cache lives in one server instance, not shared.
+
+---
 
 ## Notes
 
