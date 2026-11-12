@@ -454,6 +454,8 @@
           <div class="feat"><div class="k">Comms</div><h3>Radio plan captured</h3><p>Function, channel, RX/TX frequencies and tones come out as their own rows for the comms unit.</p></div>
           <div class="feat"><div class="k">Map</div><h3>Matched to the live incident</h3><p>Extracted incidents are matched by name to the national feed and highlighted, with your form totals beside official ones.</p></div>
           <div class="feat"><div class="k">Export</div><h3>CSV for Excel &amp; Sheets</h3><p>Built in your browser from one extraction, so nothing is processed twice. Formula-safe cells.</p></div>
+          <div class="feat"><div class="k">Save</div><h3>Drop in the whole IAP</h3><p>fifi finds the ICS-204 pages in your browser, for free, and skips the 202s, 203s, 205s, maps and weather. You only pay for the pages that matter, and you can override the picks.</p></div>
+          <div class="feat"><div class="k">Review</div><h3>Flags hard handwriting</h3><p>Rows Gemini found hard to read are marked <b>needs review</b> with a note on what's unclear, so a person checks them against the paper.</p></div>
           <div class="feat"><div class="k">Access</div><h3>Bring a key, or a link</h3><p>Use your own free Gemini key, or a private access link from the site owner. Keys are never stored on the server.</p></div>
         </div>
       </div>
@@ -465,10 +467,10 @@
         <div class="sec-label">03 <i>//</i> How it works</div>
         <h2>Five steps from a phone photo to a row in your spreadsheet.</h2>
         <div class="pipe">
-          <div class="step"><h3>Capture</h3><p>Photo, scan or PDF of the ICS-204. Big photos are resized in your browser.</p></div>
+          <div class="step"><h3>Capture</h3><p>Photo, scan, or a whole IAP PDF. fifi picks out the ICS-204 pages and resizes images in your browser.</p></div>
           <div class="step"><h3>Read</h3><p>Google Gemini vision reads the form against a fixed JSON schema.</p></div>
           <div class="step"><h3>Flatten</h3><p>Nested sections become rows: one per resource and one per comms entry.</p></div>
-          <div class="step"><h3>Flag</h3><p>Staffing status per resource. Understaffed crews counted per incident.</p></div>
+          <div class="step"><h3>Flag</h3><p>Staffing status per resource, plus "needs review" on handwriting the AI couldn't read for sure.</p></div>
           <div class="step"><h3>Use</h3><p>Preview, download the CSV, and see the incident on the live map.</p></div>
         </div>
 
@@ -483,7 +485,7 @@
             </tbody>
           </table>
         </div>
-        <p class="caption">Illustrative example, not a real incident. The real CSV has 33 columns, including period, supervisors, task, frequencies and approvals.</p>
+        <p class="caption">Illustrative example, not a real incident. The real CSV has 37 columns, including period, supervisors, task, frequencies, approvals and human-review flags.</p>
       </div>
     </section>
 
@@ -523,7 +525,7 @@
         <div class="flow" aria-label="Where your data goes">
           <div class="node"><div class="nk">You</div><h3>Your browser</h3><p>Shrinks photos. Holds your results and CSV.</p></div>
           <div class="link"><span>HTTPS</span></div>
-          <div class="node"><div class="nk">fifi server</div><h3>Memory only</h3><p>About 10 seconds per form. No disk, no database, no logs of content.</p></div>
+          <div class="node"><div class="nk">fifi server</div><h3>Memory only</h3><p>About 10 seconds per page. No disk, no database, no logs of content.</p></div>
           <div class="link"><span>HTTPS</span></div>
           <div class="node"><div class="nk">Google</div><h3>Gemini API</h3><p>Reads the form and returns the fields, under Google's API terms.</p></div>
         </div>
@@ -550,34 +552,34 @@
       <div class="wrap">
         <div class="sec-label">06 <i>//</i> Transparency</div>
         <h2>Which AI reads your form, how often it's called, and what it costs.</h2>
-        <p class="sec-lede">Measured on four real ICS-204 photos (5 to 23 rows each). Prices are Google's published paid-tier rates, read 12 Nov 2026. The extractor shows the same numbers live for every form you process.</p>
+        <p class="sec-lede">Measured on four real ICS-204 photos (5 to 23 rows each). Costs are <b>per ICS-204 page</b>: a multi-page PDF costs that for each ICS-204 page fifi sends, and other pages cost nothing. Prices are Google's published paid-tier rates, read 12 Nov 2026. The extractor shows the same numbers live for every form you process.</p>
 
         <div class="tx">
           <div class="tx-card">
             <div class="nk">Your own key · public site</div>
             <h3>Gemini 3.8 Flash</h3>
             <dl>
-              <dt>API calls per form</dt><dd>1</dd>
-              <dt>Average time</dt><dd>9.2 s <small>(4.7–14 s)</small></dd>
-              <dt>Tokens per form</dt><dd>1,164 in · ~1,170 out</dd>
+              <dt>API calls per ICS-204 page</dt><dd>1</dd>
+              <dt>Average time</dt><dd>8.9 s <small>(6.7–11.2 s)</small></dd>
+              <dt>Tokens per page</dt><dd>1,339 in · ~1,130 out</dd>
               <dt>Price per 1M tokens</dt><dd>$0.75 in · $3.75 out</dd>
-              <dt>Cost per form</dt><dd><b>≈ $0.005</b> <small>(0.3–0.9¢)</small></dd>
+              <dt>Cost per page</dt><dd><b>≈ $0.005</b> <small>(0.3–0.7¢)</small></dd>
               <dt>Free tier</dt><dd class="yes">Yes: $0</dd>
             </dl>
-            <p>Free-tier content may be used by Google to improve its products. Paid keys are not. Price doubles from 1 Jan 2027 (≈ $0.01 per form).</p>
+            <p>Free-tier content may be used by Google to improve its products. Paid keys are not. Price doubles from 1 Jan 2027 (≈ $0.01 per page).</p>
           </div>
           <div class="tx-card pro">
             <div class="nk">Private access link</div>
             <h3>Gemini 3.1 Pro Preview</h3>
             <dl>
-              <dt>API calls per form</dt><dd>1</dd>
-              <dt>Average time</dt><dd>10.9 s <small>(6.6–16 s)</small></dd>
-              <dt>Tokens per form</dt><dd>1,164 in · ~1,520 out</dd>
+              <dt>API calls per ICS-204 page</dt><dd>1</dd>
+              <dt>Average time</dt><dd>12.2 s <small>(7.4–16.6 s)</small></dd>
+              <dt>Tokens per page</dt><dd>1,339 in · ~1,760 out</dd>
               <dt>Price per 1M tokens</dt><dd>$2.00 in · $12.00 out</dd>
-              <dt>Cost per form</dt><dd><b>≈ $0.02</b> <small>(1.1–2.9¢)</small></dd>
+              <dt>Cost per page</dt><dd><b>≈ $0.024</b> <small>(1.2–3.5¢)</small></dd>
               <dt>Free tier</dt><dd class="no">None: billed to the owner</dd>
             </dl>
-            <p>Higher-effort reasoning for invited users. About 50 forms per dollar, paid by the site owner, never by the visitor.</p>
+            <p>Google's stronger model for invited users, on LOW thinking: in tests it matched HIGH (same rows, same handwriting flags) at half the time and cost. About 40 pages per dollar, paid by the site owner, never by the visitor.</p>
           </div>
         </div>
 
@@ -585,7 +587,8 @@
           <div class="store-row head"><span>When you…</span><span>Calls made</span><span>Gemini calls</span></div>
           <div class="store-row"><span><b>Open the landing page</b></span><span>2 requests to NIFC (incidents, perimeters) + 1 to fifi's hotspot relay, which asks NASA at most once every 15 min</span><span class="zero">0</span></div>
           <div class="store-row"><span><b>Open an access link</b></span><span>1 check of the code on fifi's server</span><span class="zero">0</span></div>
-          <div class="store-row"><span><b>Extract a form</b></span><span>1 upload to fifi → 1 request to Gemini. Forms go one at a time (about 6 per minute at most).</span><span class="one">1 per form</span></div>
+          <div class="store-row"><span><b>Add a PDF or a whole IAP</b></span><span>Pages are sorted in your browser: built-in text, or free OCR (Tesseract.js) for scans. Non-ICS-204 pages are never sent.</span><span class="zero">0</span></div>
+          <div class="store-row"><span><b>Extract ICS-204 pages</b></span><span>1 upload to fifi → 1 request to Gemini per page. Pages go one at a time (about 6 per minute at most).</span><span class="one">1 per page</span></div>
           <div class="store-row"><span><b>Preview, download CSV, view on map</b></span><span>Done in your browser from results you already have</span><span class="zero">0</span></div>
         </div>
 
@@ -610,6 +613,8 @@
           <details><summary>Where does the map data come from?</summary><p>Incidents and perimeters come from the National Interagency Fire Center's WFIGS public feeds (current incidents). Hotspots are NASA FIRMS VIIRS detections from the NOAA-20 and NOAA-21 satellites over the trailing 24 hours. Satellite imagery is Esri World Imagery. Nothing on the map needs a key.</p></details>
           <details><summary>What is a "hotspot", and is every hotspot a wildfire?</summary><p>A hotspot is a satellite pixel (about 375 m) that was unusually hot during an overpass. Fire radiative power (MW) is how intense it was. Most are vegetation fires, but some are prescribed burns, agricultural burning, flares or industrial heat. Use the confidence and power filters to cut noise.</p></details>
           <details><summary>Are my forms or my API key stored?</summary><p>No. Each form is held in server memory only while Gemini reads it, then discarded; it is never written to disk or a database. Your key is used for that one request and never saved on the server. See <a href="#security">Security &amp; privacy</a> for exactly where everything goes.</p></details>
+          <details><summary>Can I upload a whole IAP?</summary><p>Yes. Drop the full IAP PDF in. Your browser reads each page (or runs free OCR on scanned pages) and selects only the ICS-204 Assignment Lists. Everything else is skipped and never sent, so it costs nothing. You see which pages were picked and can include or skip any page before extracting. As a safety net, Gemini also confirms each page is an ICS-204.</p></details>
+          <details><summary>What does "needs review" mean?</summary><p>For every resource and radio row, Gemini says whether the handwriting was clear, uncertain or illegible, and notes what was unclear (for example "num_persons: 3 or 8, smudged"). Uncertain and illegible rows are marked <b>needs review</b> and highlighted, and you can filter to just those. It's the model's own judgment, not a measured probability, so it can miss things: always spot-check.</p></details>
           <details><summary>How accurate is the extraction?</summary><p>Gemini reads typed and handwritten forms well, but smudged, faint or crossed-out entries can still be misread. Always review the CSV before using it for decisions.</p></details>
           <details><summary>How does "matched to the live incident" work?</summary><p>fifi compares the incident name on your form with names in the national feed, ignoring case, punctuation and words like "Fire" or "Complex". If there's a match, the incident gets a gold ring and your form totals appear in its popup. Small or local incidents may not be in the national feed.</p></details>
           <details><summary>Is this an official NWCG, FEMA or agency tool?</summary><p>No. fifi is an independent student project. For evacuations and official information, follow your local agencies and InciWeb.</p></details>

@@ -235,7 +235,16 @@ def extract():
             return jsonify({"error": "Gemini took too long on this form. Press Extract data to try again."}), 504
         return jsonify({"error": "Couldn't reach Gemini. Try again shortly."}), 502
 
-    return jsonify({"rows": flatten(data, upload.filename), "model": model, "usage": usage})
+    if data.get("is_ics204") is False:
+        # Safety net: the browser already skips non-204 pages, but a photo of another form can slip through.
+        detected = str(data.get("detected_form") or "another document")[:60]
+        return jsonify({"error": f"Not an ICS-204 (looks like {detected}). Skipped.",
+                        "not_ics204": True, "detected_form": detected, "model": model, "usage": usage}), 422
+
+    rows = flatten(data, upload.filename)
+    return jsonify({"rows": rows, "model": model, "usage": usage,
+                    "needs_review": sum(1 for r in rows if r.get("needs_review") == "YES"),
+                    "form_review_note": rows[0].get("form_review_note", "") if rows else ""})
 
 
 @app.errorhandler(413)

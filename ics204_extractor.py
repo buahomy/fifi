@@ -17,17 +17,30 @@ PUBLIC_THINKING = os.environ.get("GEMINI_THINKING", "LOW")
 
 # Private-access visitors using the owner's key: the owner's original Pro setup.
 OWNER_MODEL = os.environ.get("OWNER_GEMINI_MODEL", "gemini-3.1-pro-preview")
-OWNER_THINKING = os.environ.get("OWNER_GEMINI_THINKING", "HIGH")
+# LOW, not HIGH: with the legibility instructions, HIGH took 25.6 s and ~$0.055 per page versus
+# 12.2 s and ~$0.024 on LOW, with identical rows and the same hard-to-read rows flagged (2026-11-12).
+OWNER_THINKING = os.environ.get("OWNER_GEMINI_THINKING", "LOW")
 
 # Preview models (like gemini-3.1-pro-preview) are only served on v1beta.
 API_VERSION = "v1beta"
 
 PROMPT = (
-    "Extract all data from this ICS-204 Work Assignment Form and structure it as JSON. "
-    "Carefully read every field, including the incident header, resources assigned, "
-    "work assignments, communications plan and approval section. Include handwritten "
-    "entries and corrections. If a field is empty or not visible, use an empty string."
+    "First decide whether this page is an ICS-204 Assignment List (also titled 'Work Assignment' "
+    "or 'Division/Group Assignment List'). Set is_ics204 and detected_form accordingly. If it is "
+    "not an ICS-204, return empty sections.\n"
+    "If it is, extract all data and structure it as JSON. Carefully read every field, including "
+    "the incident header, resources assigned, work assignments, communications plan and approval "
+    "section. Include handwritten entries and corrections. If a field is empty or not visible, "
+    "use an empty string.\n"
+    "Legibility: for every resource and communications row, set legibility to 'clear' when you are "
+    "sure of every value, 'uncertain' when any handwritten value is hard to read and you are giving "
+    "your best reading, or 'illegible' when you cannot read it. For uncertain or illegible rows, "
+    "write review_note naming the field and the problem (e.g. 'num_persons: 3 or 8, smudged'). "
+    "List any unclear header, work-assignment or approval fields in unclear_fields. Never guess "
+    "silently: if you are not sure, flag it."
 )
+
+LEGIBILITY = ["clear", "uncertain", "illegible"]
 
 # Column order of the CSV. Every row has every column, so the file lines up cleanly.
 COLUMNS = [
@@ -40,14 +53,22 @@ COLUMNS = [
     "comm_tx_frequency", "comm_tx_tone", "comm_mode",
     "prepared_by", "approved_by", "approval_date", "approval_time",
     "status",
+    # Human-review flags (Gemini's own judgment of handwriting, not a measured probability)
+    "needs_review", "legibility", "review_note", "form_review_note",
 ]
+
+
+def _schema(kind):
+    if kind == "LEGIBILITY":
+        return types.Schema(type=types.Type.STRING, enum=LEGIBILITY)
+    return types.Schema(type=kind)
 
 
 def _obj(fields, required=None):
     return types.Schema(
         type=types.Type.OBJECT,
         required=required,
-        properties={name: types.Schema(type=kind) for name, kind in fields.items()},
+        properties={name: _schema(kind) for name, kind in fields.items()},
     )
 
 
@@ -55,10 +76,16 @@ def _strings(*names):
     return {name: types.Type.STRING for name in names}
 
 
+_REVIEW = {"legibility": "LEGIBILITY", "review_note": types.Type.STRING}
+
+
 RESPONSE_SCHEMA = types.Schema(
     type=types.Type.OBJECT,
-    required=["incident_header", "resources_assigned", "work_assignments"],
+    required=["is_ics204", "detected_form", "incident_header", "resources_assigned", "work_assignments"],
     properties={
+        "is_ics204": types.Schema(type=types.Type.BOOLEAN),
+        "detected_form": types.Schema(type=types.Type.STRING),
+        "unclear_fields": types.Schema(type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING)),
         "incident_header": _obj(_strings(
             "incident_name", "operational_period", "date_from", "date_to", "branch", "division_group")),
         "operations_personnel": _obj(_strings(
@@ -66,14 +93,14 @@ RESPONSE_SCHEMA = types.Schema(
         "resources_assigned": types.Schema(
             type=types.Type.ARRAY,
             items=_obj({**_strings("designator", "lwd", "leader", "drop_off", "pick_up"),
-                        "num_persons": types.Type.INTEGER}),
+                        "num_persons": types.Type.INTEGER, **_REVIEW}, required=["legibility"]),
         ),
         "work_assignments": _obj(_strings("task", "purpose", "end_state")),
         "special_instructions": types.Schema(type=types.Type.STRING),
         "communications_plan": types.Schema(
             type=types.Type.ARRAY,
-            items=_obj(_strings("function", "channel", "rx_frequency", "rx_tone",
-                                "tx_frequency", "tx_tone", "mode")),
+            items=_obj({**_strings("function", "channel", "rx_frequency", "rx_tone",
+                                   "tx_frequency", "tx_tone", "mode"), **_REVIEW}, required=["legibility"]),
         ),
         "approval": _obj(_strings("prepared_by", "approved_by", "date", "time")),
     },
@@ -174,12 +201,13 @@ def flatten(data: dict, source_file: str) -> list[dict]:
         "approved_by": approval.get("approved_by", ""),
         "approval_date": approval.get("date", ""),
         "approval_time": approval.get("time", ""),
+        "form_review_note": "; ".join(str(f) for f in (data.get("unclear_fields") or []) if f),
     })
 
     rows = []
     for res in data.get("resources_assigned") or []:
         num = res.get("num_persons") or 0
-        rows.append({**base,
+        rows.append({**base, **review_flags(res),
                      "resource_designator": res.get("designator", ""),
                      "resource_leader": res.get("leader", ""),
                      "num_persons": num,
@@ -191,7 +219,7 @@ def flatten(data: dict, source_file: str) -> list[dict]:
         rows.append({**base, "status": "NO_RESOURCES"})
 
     for comm in data.get("communications_plan") or []:
-        rows.append({**base,
+        rows.append({**base, **review_flags(comm),
                      "comm_function": comm.get("function", ""),
                      "comm_channel": comm.get("channel", ""),
                      "comm_rx_frequency": comm.get("rx_frequency", ""),
@@ -201,3 +229,15 @@ def flatten(data: dict, source_file: str) -> list[dict]:
                      "comm_mode": comm.get("mode", ""),
                      "status": "COMMUNICATION"})
     return rows
+
+
+def review_flags(item: dict) -> dict:
+    """needs_review = YES when Gemini says a row's handwriting was uncertain or illegible."""
+    legibility = str(item.get("legibility") or "").lower()
+    if legibility not in LEGIBILITY:
+        legibility = ""
+    return {
+        "legibility": legibility,
+        "needs_review": "YES" if legibility in ("uncertain", "illegible") else "",
+        "review_note": item.get("review_note", "") if legibility != "clear" else "",
+    }

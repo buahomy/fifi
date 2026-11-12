@@ -69,7 +69,7 @@ On a wildfire, each operational period produces an **Incident Action Plan (IAP)*
 |---|---|---|
 | ICS-204s are **paper**, often photographed on a phone | Someone retypes them by hand, which is slow and error-prone | Snap a photo; AI fills the spreadsheet |
 | Forms are **corrected by hand** (crossed-out names, red-ink swaps) | Typed copies fall out of date; handwriting is hard to read | Gemini reads handwriting and corrections |
-| Each division has its **own page** | No quick way to total people or resources across the incident | All forms merge into one CSV with the same 33 columns |
+| Each division has its **own page** | No quick way to total people or resources across the incident | All forms merge into one CSV with the same 37 columns |
 | **Understaffed crews** are buried in the table | A one-person resource is easy to miss | Automatic `CRITICAL` / `NO_PERSONNEL` flags and an "understaffed" count |
 | **Radio channels** are scattered across forms | The comms unit compiles them by hand | Channels come out as their own rows |
 | No link between the form and the **bigger picture** | You can't see the fire's size, containment or perimeter alongside your staffing | Your incident shows on a live national fire map |
@@ -81,7 +81,7 @@ On a wildfire, each operational period produces an **Incident Action Plan (IAP)*
 |---|---|---|
 | F1 | Upload one or many forms by **drag and drop or file browse** (JPG, PNG, WEBP, PDF) | `extract.html` |
 | F2 | **Read the form (OCR + understanding)** with Gemini, including handwriting, into a fixed JSON schema | `ics204_extractor.py` |
-| F3 | **Flatten** each form into one row per resource plus one row per radio channel, all with the same 33 columns | `flatten()` |
+| F3 | **Flatten** each form into one row per resource plus one row per radio channel, all with the same 37 columns | `flatten()` |
 | F4 | **Flag staffing** per resource: `OK`, `CRITICAL`, `NO_PERSONNEL` | `staffing_status()` |
 | F5 | **Preview** results in a table before saving | `extract.html` |
 | F6 | **Download** one combined CSV that opens cleanly in Excel or Google Sheets | `extract.html` (`toCsv`) |
@@ -90,12 +90,16 @@ On a wildfire, each operational period produces an **Incident Action Plan (IAP)*
 | F9 | **Live fire map** of incidents, perimeters and satellite hotspots, with filters | `index.html`, `/api/hotspots` |
 | F10 | **Match extracted incidents** to the live map and show your form totals | `index.html` (`matchMine`) |
 | F11 | **Clear** your saved key and map data from the device | both pages |
+| F12 | **Whole-IAP PDFs:** find the ICS-204 pages (built-in text, or free OCR for scans), skip the rest, let the user override | `extract.html` (`analyzePdf`, `classifyPage`) |
+| F13 | **Human-review flags:** mark rows whose handwriting Gemini found uncertain or illegible, with a note; highlight and filter them | schema + `review_flags()`, `extract.html` |
 
 ### Non-functional requirements (how well it does it)
 
 | Quality | Target | Measured / how |
 |---|---|---|
-| **Speed** | Average under 15 s per form | Measured on 4 real forms: Flash averages 9.2 s, Pro 10.9 s; dense forms take up to about 16 s. |
+| **Speed** | Average under 15 s per page | Measured on 4 real forms: Flash averages 8.9 s, Pro 12.2 s; the densest page took about 17 s. |
+| **Cost efficiency** | Pay only for ICS-204 pages | In a whole-IAP PDF, other forms are detected in the browser for free and never sent (test: 8-page IAP → 3 Gemini calls) |
+| **Trustworthy output** | Never guess silently | Hard handwriting is flagged for human review instead of being quietly filled in |
 | **Cost transparency** | Users see what AI they use and what it costs | Every result shows model, tokens, time and estimated cost (see [Transparency](#transparency-models-api-calls-and-cost)) |
 | **Reliability** | Never hang; clear errors | Each Gemini call is capped at 240 s (host limit 300 s). Friendly messages for a bad key, rate limit or timeout. |
 | **Security: API key** | Never stored on the server | Sent per request in a header, used once, never logged. The owner's key lives only in host environment variables. |
@@ -141,6 +145,7 @@ fifi was built in short sprints. Each one ended with something working that coul
 | 4 | Make it safe and fast for the public: bring-your-own key, one form per request, CSV built in the browser | **Fixed 33 columns on every row**; `source_image` → `source_file`; bug fix so 0 people shows `NO_PERSONNEL` |
 | 5 | Deploy (Vercel) plus a private access link for a professor; fix model and speed | No schema change; Flash/Pro split, LOW thinking (10x faster, same output) |
 | 6 | Live fire map, landing page, security section | Map summary built from CSV rows (resources, people, understaffed) |
+| 7 | Whole-IAP PDFs, human-review flags, cost transparency | Added `needs_review`, `legibility`, `review_note`, `form_review_note` (**37 columns**) |
 
 Each sprint followed **plan → build → test with real forms → review → adjust the backlog**. Example user stories:
 - *As a planning chief, I want one row per resource, so I can sort the whole incident by staffing.*
@@ -239,7 +244,7 @@ sequenceDiagram
     S->>S: resolve_key(): own key, or owner key if the code matches
     S->>G: form bytes + ICS-204 JSON schema
     G-->>S: structured fields (JSON)
-    S->>S: flatten() into 33-column rows, staffing flags
+    S->>S: flatten() into 37-column rows, staffing + review flags
     S-->>B: rows (JSON)
     Note over S: Request ends: file and key are dropped. Nothing written.
     B->>B: preview table, build CSV, optional map summary in localStorage
@@ -253,6 +258,7 @@ sequenceDiagram
 | **Backend** | Flask (web framework), Werkzeug (request handling, subclassed), `google-genai` SDK (Gemini), `certifi` (HTTPS certificates) |
 | **AI models** | Google Gemini: `gemini-3.8-flash` (visitors' own keys), `gemini-3.1-pro-preview` (access-link users), with structured JSON output |
 | **Map** | MapLibre GL JS 4.7.1, CARTO Dark Matter basemap, Esri World Imagery |
+| **PDF handling (in the browser)** | PDF.js 4.10.38 (reads and renders PDF pages), Tesseract.js 5.1.1 (free OCR on scanned page headers) |
 | **Live data** | NIFC WFIGS (incidents and perimeters, ArcGIS REST), NASA FIRMS VIIRS (satellite hotspots) |
 | **Hosting** | Vercel (serverless Python, CDN, encrypted environment variables, auto-deploy on push) |
 | **Source control** | Git, GitHub |
@@ -279,12 +285,12 @@ Measured on four real ICS-204 photos (5–23 rows each). Prices are Google's pai
 
 | | Public site (visitor's own key) | Private access link (owner's key) |
 |---|---|---|
-| Model | `gemini-3.8-flash`, LOW thinking | `gemini-3.1-pro-preview`, HIGH thinking |
-| Gemini calls per form | **1** | **1** |
-| Average time per form | 9.2 s (range 4.7–14 s) | 10.9 s (range 6.6–16 s) |
-| Tokens per form | 1,164 in (same for every photo) · 458–2,072 out | 1,164 in · 697–2,220 out |
+| Model | `gemini-3.8-flash`, LOW thinking | `gemini-3.1-pro-preview`, LOW thinking |
+| Gemini calls | **1 per ICS-204 page** (other pages: 0) | **1 per ICS-204 page** (other pages: 0) |
+| Average time per page | 8.9 s (range 6.7–11.2 s) | 12.2 s (range 7.4–16.6 s) |
+| Tokens per page | 1,339 in (same for every photo) · 503–1,706 out | 1,339 in · 775–2,666 out |
 | Price per 1M tokens | $0.75 in · $3.75 out (doubles on 1 Jan 2027) | $2.00 in · $12.00 out |
-| Cost per form | **≈ $0.005** (0.3–0.9¢), about 190 forms per $1 | **≈ $0.02** (1.1–2.9¢), about 50 forms per $1 |
+| Cost per page | **≈ $0.005** (0.3–0.7¢), about 190 pages per $1 | **≈ $0.024** (1.2–3.5¢), about 40 pages per $1 |
 | Free tier | **Yes ($0)**, but Google may use free-tier content to improve its products | **No**: always billed to the key owner |
 
 **What calls happen when:**
@@ -293,7 +299,8 @@ Measured on four real ICS-204 photos (5–23 rows each). Prices are Google's pai
 |---|---|---|
 | Open the landing page | 2 to NIFC (incidents, perimeters) + 1 to `/api/hotspots`, which asks NASA at most once every 15 minutes | 0 |
 | Open an access link | 1 code check (`/api/access`) | 0 |
-| Extract a form | 1 upload → 1 Gemini call. Forms go one at a time, so a visitor makes at most about 6 calls per minute. | **1 per form** |
+| Add a PDF or whole IAP | Pages are sorted in the browser (built-in text, or Tesseract.js OCR for scans). Non-ICS-204 pages are never sent. | 0 |
+| Extract ICS-204 pages | 1 upload → 1 Gemini call per page. Pages go one at a time, so a visitor makes at most about 6 calls per minute. | **1 per page** |
 | Preview, download CSV, view on map | Done in the browser from results already received | 0 |
 
 **Rate limits:** Google doesn't publish fixed per-minute limits for these two models. They depend on the key's usage tier (Free, Tier 1–3), are shown in [AI Studio](https://aistudio.google.com/rate-limit), reset daily at midnight Pacific time, and are tighter for preview models. When a limit is hit, fifi shows "rate limit reached, wait a minute" and only the failed forms are retried.
@@ -308,7 +315,8 @@ Measured on four real ICS-204 photos (5–23 rows each). Prices are Google's pai
    - **Bring your own key:** visitors paste their own free [Gemini API key](https://aistudio.google.com/apikey). It's sent only with their own requests (in the `X-Gemini-Key` header) and is never stored on the server. They can choose to remember it in their own browser.
    - **Private access link:** people you trust open `https://your-site/?access=YOUR_CODE` and use the site owner's key with no setup. The code is checked on the server and remembered in their browser, and the owner's key never leaves the server. See [Private access](#private-access).
 2. **Upload:** drag and drop forms (`.jpg`, `.png`, `.webp`, `.pdf`). Large photos are resized in the browser before upload, so phone pictures work fine.
-3. **Extract:** forms are sent one at a time to Gemini with a fixed ICS-204 JSON schema, so the output has the same structure every time.
+   - **Whole IAP PDFs:** the browser reads each page with PDF.js. Pages with built-in text are checked for ICS-204 markers ("ASSIGNMENT LIST", "Resources Assigned", "Drop off / Pick up", …); scanned pages get free OCR (Tesseract.js) on just the header and footer. Only ICS-204 pages are selected, shown as a page picker you can override, and each is sent as a compressed image. Non-204 pages are never uploaded.
+3. **Extract:** pages are sent one at a time to Gemini with a fixed ICS-204 JSON schema, so the output has the same structure every time. Gemini also confirms the page is an ICS-204 (a safety net) and rates the legibility of every row.
 4. **Organize:** each form is flattened into **one row per resource**, plus one row per communications-plan entry. Every row carries the form's header info, so it still makes sense after sorting or filtering.
 5. **Download:** the CSV is built in the browser from the results, so nothing is processed twice.
 
@@ -337,7 +345,7 @@ Settings go in environment variables, or in a git-ignored `.env` file locally:
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Model for visitors using their own key (free-tier friendly) |
 | `GEMINI_THINKING` | `LOW` | Thinking level for that model. On Flash, `LOW` is about 10x faster than `HIGH` and matched it on test forms. |
 | `OWNER_GEMINI_MODEL` | `gemini-3.1-pro-preview` | Model for private-access visitors using the owner's key |
-| `OWNER_GEMINI_THINKING` | `HIGH` | Thinking level for the owner's model (about 15 s per form on Pro) |
+| `OWNER_GEMINI_THINKING` | `LOW` | Thinking level for the owner's model. With the review instructions, `HIGH` took 25.6 s and ~$0.055 per page versus 12.2 s and ~$0.024 on `LOW`, with identical results. |
 | `PORT` | `8080` | Local server port |
 | `FLASK_DEBUG` | `0` | `1` enables auto-reload |
 
@@ -373,6 +381,7 @@ It also runs on any host that supports Python (Render, Railway, Fly.io, Cloud Ru
 | **Communications** | `comm_function`, `comm_channel`, `comm_rx_frequency`, `comm_rx_tone`, `comm_tx_frequency`, `comm_tx_tone`, `comm_mode` |
 | **Approval** | `prepared_by`, `approved_by`, `approval_date`, `approval_time` |
 | **Analysis** | `status` |
+| **Human review** | `needs_review`, `legibility`, `review_note`, `form_review_note` |
 
 ### `status` values
 
@@ -384,11 +393,22 @@ It also runs on any host that supports Python (Render, Railway, Fly.io, Cloud Ru
 | `NO_RESOURCES` | The form lists no resources |
 | `COMMUNICATION` | Row is a communications-plan entry, not a resource |
 
+### Human-review columns
+
+| Column | Meaning |
+|---|---|
+| `legibility` | Gemini's judgment of that row's handwriting: `clear`, `uncertain` (best reading given) or `illegible` |
+| `needs_review` | `YES` when legibility is `uncertain` or `illegible`; check the value against the paper form |
+| `review_note` | What was unclear, e.g. `num_persons: 3 or 8, smudged` |
+| `form_review_note` | Unclear header, work-assignment or approval fields on that page (same on every row of the page) |
+
+These flags are the model's **self-assessment, not a measured probability**. In testing, a deliberately blurred form had its three handwritten rows flagged and its typed rows left `clear`, and Flash and Pro disagreed on exactly those flagged values. They can still miss errors, so spot-check.
+
 ---
 
 ## API
 
-`POST /api/extract` takes `multipart/form-data` with one `file`, and optionally an `X-Gemini-Key` header. It returns `{"rows": [...], "model": "...", "usage": {"calls": 1, "seconds": 9.2, "tokens_in": 1164, "tokens_out": 1167, "est_cost_usd": 0.0052}}`.
+`POST /api/extract` takes `multipart/form-data` with one `file`, and optionally an `X-Gemini-Key` header. It returns `{"rows": [...], "model": "...", "usage": {"calls": 1, "seconds": 9.2, "tokens_in": 1164, "tokens_out": 1167, "est_cost_usd": 0.0052}, "needs_review": 0, "form_review_note": ""}`. A page that turns out not to be an ICS-204 returns 422 with `not_ics204: true` (and its usage, since the call was made).
 
 ```bash
 curl -H "X-Gemini-Key: $GEMINI_KEY" -F "file=@form.jpg" http://localhost:8080/api/extract
@@ -409,7 +429,7 @@ Instead of `X-Gemini-Key`, a request can send `X-Access-Code` to use the owner's
 | `app.py` | The server. Serves the pages and the API (`/api/extract`, `/api/access`, `/api/config`, `/api/hotspots`). Decides which API key to use, keeps uploads in memory (`InMemoryRequest`), turns Gemini errors into friendly messages, and relays NASA satellite data with a 15-minute cache. |
 | `ics204_extractor.py` | The "brain". The prompt and the ICS-204 JSON schema sent to Gemini, the model settings, Google's published prices (`PRICING`) for the usage and cost report, `flatten()` (one form → 33-column rows) and the staffing rules. |
 | `public/index.html` | Landing page and live fire map: hero with live numbers, map layers and filters, IAP explainer, security section, FAQ. |
-| `public/extract.html` | The extractor: API key or access link, drag-and-drop upload, browser-side photo resizing, per-file progress, preview table, CSV download. |
+| `public/extract.html` | The extractor: API key or access link, drag-and-drop upload, whole-IAP page detection (PDF.js + Tesseract.js) with a page picker, browser-side resizing, per-page progress and usage, review highlighting and filter, preview table, CSV download. |
 | `vercel.json` | Tells Vercel that `/extract` means `extract.html` (Vercel serves page files from its CDN). |
 | `requirements.txt` | Python dependencies: `flask`, `google-genai`. |
 | `.gitignore` | Keeps secrets (`.env`), private form photos (`input_forms/`) and local tooling out of Git. |
@@ -434,6 +454,8 @@ Instead of `X-Gemini-Key`, a request can send `X-Access-Code` to use the owner's
 | 11 | **The original version wouldn't run** | Its environment broke when the folder moved, and the new Google SDK changed defaults | A fresh environment with the older SDK the code was written for (`google-genai` 1.75) |
 | 12 | **Free-tier rate limits** | Free Gemini keys allow only a few requests per minute | Forms go one at a time, with a friendly "wait a minute" message; only failed forms retry |
 | 13 | **Status bug in the original code** | The "0 people" check came after "fewer than 2", so it could never run | Reordered the checks; 0 people now shows `NO_PERSONNEL` |
+| 14 | **Whole IAPs would waste money** | An IAP is 30–60+ pages but only a few are ICS-204s; sending all of them pays for pages nobody needs | Free in-browser page detection (PDF.js text, Tesseract.js OCR for scans) plus a page picker; only 204 pages are sent |
+| 15 | **Pro got 2x slower and pricier after adding review flags** | HIGH thinking spent many extra tokens reasoning about legibility (25.6 s, ~$0.055 per page) | Re-measured: LOW gave identical rows and flags at 12.2 s and ~$0.024, so LOW became the default |
 
 ## Technical debt: where AI-written code needs care
 
@@ -447,6 +469,8 @@ Most of the code was written with AI assistance and then reviewed and tested by 
 6. **Big single files.** Each HTML page holds its CSS and JavaScript inline (the landing page is about 1,000 lines), with no linter or build step. Easy to deploy, harder to change safely.
 7. **Fragile outside dependencies.** A preview Gemini model can be retired, the NIFC field names can change, and loose version ranges (`flask>=3.0`) can pull in breaking updates.
 8. **Heuristics.** Matching a form to the live map uses the incident name only, so two fires with similar names could match wrongly. The hotspot cache lives in one server instance, not shared.
+9. **Page detection is rule-based.** ICS-204 pages are found by keywords and printed labels. An unusual agency layout, or a scan too poor for OCR, can be missed or wrongly picked; the page picker and Gemini's `is_ics204` check are the safety nets.
+10. **Review flags are self-reported.** Gemini judges its own legibility. It's useful but not calibrated, and it can be confidently wrong. A ground-truth test set would let us measure how often flags catch real errors.
 
 ---
 
@@ -455,4 +479,4 @@ Most of the code was written with AI assistance and then reviewed and tested by 
 - **Accuracy:** Gemini reads handwriting well, but smudged or crossed-out entries can be misread. Review the CSV before using it for operational decisions.
 - **Privacy:** see [Security & privacy](#security--privacy).
 - **Not for emergency use:** map feeds can be delayed or incomplete. Confirm with official sources and InciWeb.
-- **Limits:** uploads are capped at 4 MB per form after resizing. Free Gemini keys have per-minute rate limits; if you hit one, wait a minute and press Extract again, and only the failed forms are retried.
+- **Limits:** each uploaded page is capped at 4 MB after resizing (whole PDFs are read in the browser, so they have no upload limit). Free Gemini keys have per-minute rate limits; if you hit one, wait a minute and press Extract again, and only the failed pages are retried.

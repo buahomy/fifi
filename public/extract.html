@@ -171,6 +171,29 @@
     .status-NO_RESOURCES { background: rgba(139,156,179,0.2); color: var(--muted); }
 
     .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .file-item.pdf-item { display: block; }
+    .pdf-head { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
+    .pdf-sum { font-size: 0.8rem; color: var(--muted); margin: 0.3rem 0 0.5rem; }
+    .pdf-sum b { color: var(--text); }
+    .pages { display: flex; flex-wrap: wrap; gap: 4px; }
+    .chip-pg { min-width: 34px; padding: 0.2rem 0.35rem; border-radius: 5px; border: 1px solid var(--border); background: transparent; color: #6f5c4f; font-family: var(--mono); font-size: 0.7rem; cursor: pointer; }
+    .chip-pg.on { background: rgba(255, 90, 31, 0.18); border-color: var(--accent); color: var(--text); }
+    .chip-pg.off.unknown { border-style: dashed; color: #fbbf24; }
+    .chip-pg.done { background: rgba(45, 198, 83, 0.16); border-color: #2dc653; color: var(--text); }
+    .chip-pg.failed { border-color: var(--error); color: #fca5a5; }
+    .chip-pg.rejected { text-decoration: line-through; }
+    .chip-pg:disabled { cursor: default; }
+    .pdf-hint { font-size: 0.72rem; color: var(--muted); margin-top: 0.45rem; }
+    .pdf-err { font-size: 0.75rem; color: #fca5a5; margin-top: 0.2rem; }
+    .rv { color: #fbbf24; font-weight: 600; }
+    .review-bar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; border: 1px solid rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.08); color: #fde68a; border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 1rem; font-size: 0.82rem; }
+    .review-toggle { display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; white-space: nowrap; color: var(--text); }
+    tr.review td { background: rgba(251, 191, 36, 0.07); }
+    tr.review td:first-child { box-shadow: inset 3px 0 0 #fbbf24; }
+    .status-REVIEW { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+    .leg { font-family: var(--mono); font-size: 0.72rem; }
+    .leg-uncertain { color: #fbbf24; }
+    .leg-illegible { color: #fca5a5; }
     .usage { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 0.9rem; margin-bottom: 1rem; background: var(--surface-2); font-size: 0.8rem; color: var(--muted); }
     .usage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin-bottom: 0.5rem; }
     .usage-grid b { display: block; font-family: var(--mono); font-size: 1.05rem; color: var(--text); }
@@ -234,7 +257,7 @@
     </div>
 
     <div class="card">
-      <div class="card-title">2 · Upload ICS-204 forms</div>
+      <div class="card-title">2 · Upload ICS-204 forms, or a whole IAP</div>
       <div class="formats">
         <span class="format-badge">JPG</span>
         <span class="format-badge">PNG</span>
@@ -245,7 +268,7 @@
         <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.webp,.pdf,image/png,image/jpeg,image/webp,application/pdf" multiple>
         <div class="dropzone-icon">📋</div>
         <p><strong>Click to browse</strong> or drag &amp; drop forms here</p>
-        <p>Photos are resized in your browser before upload · PDFs up to 4 MB</p>
+        <p>Photos, scans, or a full IAP PDF: fifi finds the ICS-204 pages in your browser and only sends those to Gemini</p>
       </div>
       <div class="file-list" id="file-list"></div>
       <div class="actions">
@@ -259,6 +282,10 @@
       <div class="card-title">3 · Extracted data</div>
       <div class="stats" id="stats"></div>
       <div class="usage hidden" id="usage" aria-live="polite"></div>
+      <div class="review-bar hidden" id="review-bar">
+        <span>⚠ <span id="review-text"></span></span>
+        <label class="review-toggle"><input type="checkbox" id="review-only"> Show only rows to review</label>
+      </div>
       <div class="preview-wrap">
         <table>
           <thead id="preview-head"></thead>
@@ -370,14 +397,26 @@
       updateUI();
     }).catch(() => {});
 
-    // ---- Files ----
+    // ---- Files: each item is a photo (one page) or a PDF (many pages; only ICS-204 pages are selected) ----
+    // item: { file, kind: 'image'|'pdf', status: 'analyzing'|'ready'|'error', progress, pdf, pages: [page] }
+    // page: { num, kind: 'ics204'|'other'|'unknown', label, include, state: 'ready'|'working'|'done'|'failed'|'rejected',
+    //         rows, usage, message, review }
     const isAllowed = name => ALLOWED.some(ext => name.toLowerCase().endsWith(ext));
+    const isPdfFile = f => f.name.toLowerCase().endsWith('.pdf');
+    const newPage = (num, extra = {}) => ({ num, kind: 'ics204', label: 'ICS-204', include: true, state: 'ready',
+      rows: [], usage: null, message: '', review: 0, ...extra });
 
     function addFiles(files) {
       for (const file of files) {
         if (!isAllowed(file.name)) { showError(`${file.name}: unsupported file type.`); continue; }
         if (items.some(i => i.file.name === file.name && i.file.size === file.size)) continue;
-        items.push({ file, state: 'ready', message: '', rows: [] });
+        if (isPdfFile(file)) {
+          const item = { file, kind: 'pdf', status: 'analyzing', progress: 'Opening PDF…', pages: [] };
+          items.push(item);
+          analyzePdf(item);
+        } else {
+          items.push({ file, kind: 'image', status: 'ready', pages: [newPage(null)] });
+        }
       }
       updateUI();
     }
@@ -393,64 +432,251 @@
     });
 
     window.removeItem = i => { if (!busy) { items.splice(i, 1); updateUI(); renderResults(); } };
+    window.togglePage = (i, num) => {
+      if (busy) return;
+      const page = items[i]?.pages.find(p => p.num === num);
+      if (!page || page.state === 'done') return;
+      page.include = !page.include;
+      updateUI();
+    };
 
     $('clear-btn').addEventListener('click', () => { items = []; hideAlerts(); updateUI(); renderResults(); });
+
+    // ---- ICS-204 page detection: runs in this browser, costs nothing, sends nothing ----
+    const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
+    const TESSERACT = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+    let pdfjsLib = null, ocrWorker = null;
+
+    async function loadPdfJs() {
+      if (!pdfjsLib) {
+        pdfjsLib = await import(PDFJS + 'pdf.min.mjs');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.mjs';
+      }
+      return pdfjsLib;
+    }
+
+    async function loadOcr() {   // free OCR for scanned pages, loaded only if a PDF has any
+      if (!ocrWorker) {
+        if (!window.Tesseract) {
+          await new Promise((ok, fail) => {
+            const s = document.createElement('script');
+            s.src = TESSERACT; s.onload = ok; s.onerror = fail;
+            document.head.appendChild(s);
+          });
+        }
+        ocrWorker = await Tesseract.createWorker('eng');
+      }
+      return ocrWorker;
+    }
+
+    // Labels printed on ICS-204s (NIMS and wildland versions). A real 204 has several; a table of contents doesn't.
+    const LABELS_204 = ['RESOURCES ASSIGNED', 'RESOURCE IDENTIFIER', 'RESOURCE DESIGNATOR', 'WORK ASSIGNMENT',
+      'SPECIAL INSTRUCTIONS', 'DROP OFF', 'PICK UP', 'NUMBER PERSONS', 'NUMBER OF PERSONS', '# OF PERSONS',
+      'REPORTING LOCATION', 'CONTROL OPERATIONS', 'OPERATIONS PERSONNEL', 'COMMUNICATION SUMMARY',
+      'DIVISION/GROUP SUPERVISOR', 'TRANS. NEEDED'];
+    const OTHER_PAGES = [[/TABLE OF CONTENTS/, 'Contents'], [/INCIDENT OBJECTIVES/, 'ICS 202'],
+      [/ORGANIZATION ASSIGNMENT LIST/, 'ICS 203'], [/RADIO COMMUNICATIONS PLAN|COMMUNICATIONS PLAN/, 'ICS 205'],
+      [/COMMUNICATIONS LIST/, 'ICS 205A'], [/MEDICAL PLAN/, 'ICS 206'], [/ORGANIZATION(AL)? CHART/, 'ICS 207'],
+      [/SAFETY MESSAGE|SAFETY PLAN/, 'ICS 208'], [/AIR OPERATIONS SUMMARY/, 'ICS 220'], [/WEATHER|FORECAST/, 'Weather'],
+      [/INCIDENT MAP/, 'Map'], [/INCIDENT ACTION PLAN/, 'IAP cover']];
+
+    // Is this page an ICS-204? `partial` = only header/footer text was available (OCR of a scan).
+    function classifyPage(text, partial = false) {
+      const t = ' ' + String(text).toUpperCase().replace(/[^A-Z0-9#/.\s-]/g, ' ').replace(/\s+/g, ' ') + ' ';
+      const title = /ASSIGNMENT LIST/.test(t) && !/ORGANIZATION ASSIGNMENT LIST|ASSIGNMENT LIST ATTACHMENT/.test(t);
+      const number = /ICS[\s#-]*204(?![0-9A-Z])/.test(t);
+      const labels = LABELS_204.filter(l => t.includes(l)).length;
+      if (partial ? (title || number) : ((title || number) && labels >= 2)) return { kind: 'ics204', label: 'ICS-204' };
+      const formNo = (t.match(/ICS[\s#-]*(2\d\d[A-Z]?)(?![0-9])/) || [])[1];
+      const other = OTHER_PAGES.find(([re]) => re.test(t));
+      return { kind: 'other', label: formNo ? `ICS ${formNo}` : other ? other[1] : 'Other page' };
+    }
+
+    async function renderPage(pdf, num, maxSide) {
+      const page = await pdf.getPage(num);
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: maxSide / Math.max(base.width, base.height) });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      return canvas;
+    }
+
+    // OCR only the header and footer strips of a scanned page: enough to spot "ASSIGNMENT LIST" or "ICS 204".
+    async function ocrHeaderFooter(pdf, num) {
+      const full = await renderPage(pdf, num, 1400);
+      const top = Math.round(full.height * 0.22), bottom = Math.round(full.height * 0.10);
+      const strip = document.createElement('canvas');
+      strip.width = full.width;
+      strip.height = top + bottom;
+      const ctx = strip.getContext('2d');
+      ctx.drawImage(full, 0, 0, full.width, top, 0, 0, full.width, top);
+      ctx.drawImage(full, 0, full.height - bottom, full.width, bottom, 0, top, full.width, bottom);
+      const { data } = await (await loadOcr()).recognize(strip);
+      return data.text || '';
+    }
+
+    async function analyzePdf(item) {
+      try {
+        const lib = await loadPdfJs();
+        const pdf = await lib.getDocument({ data: new Uint8Array(await item.file.arrayBuffer()) }).promise;
+        item.pdf = pdf;
+        const n = pdf.numPages, pages = [];
+        for (let i = 1; i <= n; i++) {
+          item.progress = `Reading page ${i} of ${n}…`;
+          updateUI();
+          const content = await (await pdf.getPage(i)).getTextContent();
+          const text = content.items.map(t => t.str).join(' ');
+          if (text.replace(/\s/g, '').length >= 40) pages.push(newPage(i, { ...classifyPage(text), via: 'text' }));
+          else pages.push(newPage(i, { kind: 'unknown', label: 'Scanned page', via: 'scan' }));
+        }
+        const scans = pages.filter(p => p.via === 'scan');
+        if (scans.length && n <= 2) {
+          // A one- or two-page scan is almost certainly the form the user meant to upload.
+          scans.forEach(p => Object.assign(p, { kind: 'ics204', label: 'Scanned page (short PDF, included)' }));
+        } else {
+          for (const [k, p] of scans.entries()) {
+            item.progress = `Checking scanned page ${p.num} (${k + 1} of ${scans.length}) with free in-browser OCR…`;
+            updateUI();
+            try {
+              const text = await ocrHeaderFooter(pdf, p.num);
+              if (text.replace(/[^A-Za-z]/g, '').length < 12) Object.assign(p, { kind: 'unknown', label: "Couldn't read the header: check this page" });
+              else Object.assign(p, classifyPage(text, true));
+            } catch {
+              Object.assign(p, { kind: 'unknown', label: "Couldn't check: include it if it's a 204" });
+            }
+          }
+        }
+        pages.forEach(p => { p.include = p.kind === 'ics204'; });
+        item.pages = pages;
+        item.status = 'ready';
+      } catch {
+        item.status = 'error';
+        item.progress = 'Could not open this PDF. Is it password-protected or damaged?';
+      }
+      updateUI();
+    }
 
     // ---- UI ----
     function hideAlerts() { $('error-alert').classList.add('hidden'); $('success-alert').classList.add('hidden'); }
     function showError(msg) { $('error-alert').textContent = msg; $('error-alert').classList.remove('hidden'); }
     function showSuccess(msg) { $('success-alert').textContent = msg; $('success-alert').classList.remove('hidden'); }
 
-    const allRows = () => items.flatMap(i => i.rows);
+    const allPages = () => items.flatMap(i => i.pages);
+    const allRows = () => allPages().flatMap(p => p.rows);
+    const pendingJobs = () => items.filter(i => i.status === 'ready')
+      .flatMap(i => i.pages.filter(p => p.include && (p.state === 'ready' || p.state === 'failed')).map(p => [i, p]));
 
-    function stateLabel(item) {
-      if (item.state === 'working') return '<span class="spinner"></span> Reading…';
-      if (item.state === 'done') {
-        const u = item.usage;
-        return `✓ ${item.rows.length} row(s)` + (u ? ` · ${u.seconds}s · ${(u.tokens_in + u.tokens_out).toLocaleString()} tokens` : '');
+    // Rough cost of one page with the model this visitor will get (for the "saves ≈ $" note).
+    function estPerPage() {
+      const ownKey = !!keyInput.value.trim();
+      const m = !ownKey && (accessCode || serverKey) ? MODELS.access_link : MODELS.own_key;
+      const r = m?.usd_per_1m;
+      return r && r.input != null ? (1339 * r.input + 1400 * r.output) / 1e6 : null;   // measured typical page
+    }
+
+    function pageState(p) {
+      if (p.state === 'working') return '<span class="spinner"></span> Reading…';
+      if (p.state === 'done') {
+        const u = p.usage;
+        return `✓ ${p.rows.length} row(s)` + (p.review ? ` · <b class="rv">⚠ ${p.review} to review</b>` : '')
+          + (u ? ` · ${u.seconds}s · ${(u.tokens_in + u.tokens_out).toLocaleString()} tokens` : '');
       }
-      if (item.state === 'failed') return esc(item.message);
-      return `${(item.file.size / 1024).toFixed(0)} KB`;
+      if (p.state === 'failed' || p.state === 'rejected') return esc(p.message);
+      return '';
+    }
+
+    function itemHtml(item, i) {
+      const rm = `<button type="button" onclick="removeItem(${i})" title="Remove" ${busy ? 'disabled' : ''}>×</button>`;
+      if (item.kind === 'image') {
+        const p = item.pages[0];
+        return `<div class="file-item"><span class="file-name">${esc(item.file.name)}</span>
+          <span class="file-state ${p.state}">${pageState(p) || `${(item.file.size / 1024).toFixed(0)} KB`}</span>${rm}</div>`;
+      }
+      if (item.status !== 'ready') {
+        return `<div class="file-item"><span class="file-name">📄 ${esc(item.file.name)}</span>
+          <span class="file-state ${item.status === 'error' ? 'failed' : ''}">${item.status === 'analyzing' ? '<span class="spinner"></span> ' : ''}${esc(item.progress)}</span>${rm}</div>`;
+      }
+      const total = item.pages.length;
+      const chosen = item.pages.filter(p => p.include).length;
+      const found = item.pages.filter(p => p.kind === 'ics204').length;
+      const skipped = total - chosen, per = estPerPage();
+      const saving = skipped ? ` · ${skipped} skipped, never sent${per ? ` (saves ≈ $${(skipped * per).toFixed(skipped * per < 0.1 ? 3 : 2)})` : ''}` : '';
+      const done = item.pages.filter(p => p.state === 'done');
+      const rows = done.reduce((s, p) => s + p.rows.length, 0), review = done.reduce((s, p) => s + p.review, 0);
+      const chips = item.pages.map(p => {
+        const mark = { done: p.review ? '⚠' : '✓', failed: '✗', rejected: '–', working: '…' }[p.state] || '';
+        const tip = `Page ${p.num}: ${p.label}${p.include ? ' · will be read' : ' · skipped'}`
+          + (p.state === 'done' ? ` · ${p.rows.length} rows` : '') + (p.message ? ` · ${p.message}` : '');
+        return `<button type="button" class="chip-pg ${p.include ? 'on' : 'off'} ${p.kind} ${p.state}" title="${esc(tip)}"
+          onclick="togglePage(${i}, ${p.num})" ${busy || p.state === 'done' ? 'disabled' : ''}>${p.num}${mark}</button>`;
+      }).join('');
+      return `<div class="file-item pdf-item">
+          <div class="pdf-head"><span class="file-name">📄 ${esc(item.file.name)}</span>${rm}</div>
+          <div class="pdf-sum">${total} page${total === 1 ? '' : 's'} · <b>${found} ICS-204 found</b> · ${chosen} selected${saving}${done.length ? ` · ✓ ${rows} rows` : ''}${review ? ` · <b class="rv">⚠ ${review} to review</b>` : ''}</div>
+          <div class="pages">${chips}</div>
+          <div class="pdf-hint">${chosen ? 'Orange pages will be read. Grey pages are skipped and never sent. Click a page to include or skip it.' : 'No ICS-204 pages found. Click a page number to include it anyway.'}</div>
+          ${item.pages.filter(p => p.state === 'failed' || p.state === 'rejected').map(p => `<div class="pdf-err">Page ${p.num}: ${esc(p.message)}</div>`).join('')}
+        </div>`;
     }
 
     function updateUI() {
       const hasKey = !!keyInput.value.trim() || serverKey;
-      const pending = items.some(i => i.state === 'ready' || i.state === 'failed');
-      $('extract-btn').disabled = busy || !hasKey || !pending;
-      $('extract-btn').innerHTML = busy ? '<span class="spinner"></span> Extracting…' : 'Extract data';
+      const analyzing = items.some(i => i.status === 'analyzing');
+      const pending = pendingJobs().length;
+      $('extract-btn').disabled = busy || analyzing || !hasKey || !pending;
+      $('extract-btn').innerHTML = busy ? '<span class="spinner"></span> Extracting…'
+        : analyzing ? 'Finding ICS-204 pages…'
+        : pending ? `Extract data (${pending} page${pending === 1 ? '' : 's'})` : 'Extract data';
       $('download-btn').disabled = busy || allRows().length === 0;
       $('clear-btn').disabled = busy || items.length === 0;
-      $('file-list').innerHTML = items.map((item, i) => `
-        <div class="file-item">
-          <span class="file-name">${esc(item.file.name)}</span>
-          <span class="file-state ${item.state}">${stateLabel(item)}</span>
-          <button type="button" onclick="removeItem(${i})" title="Remove" ${busy ? 'disabled' : ''}>×</button>
-        </div>`).join('');
+      $('file-list').innerHTML = items.map(itemHtml).join('');
     }
 
+    let reviewOnly = false;
+    $('review-only').addEventListener('change', e => { reviewOnly = e.target.checked; renderResults(); });
+
     function renderResults() {
-      const rows = allRows();
-      if (!rows.length) { $('results-card').classList.add('hidden'); return; }
-      const cols = COLUMNS.length ? COLUMNS : Object.keys(rows[0]);
+      const all = allRows();
+      if (!all.length) { $('results-card').classList.add('hidden'); return; }
+      const rows = reviewOnly ? all.filter(r => r.needs_review === 'YES') : all;
+      const baseCols = COLUMNS.length ? COLUMNS : Object.keys(all[0]);
+      // While reviewing, bring the "what's unclear" columns next to the values they describe.
+      const front = ['source_file', 'review_note', 'legibility', 'resource_designator', 'resource_leader', 'num_persons', 'comm_channel'];
+      const cols = reviewOnly ? [...front, ...baseCols.filter(c => !front.includes(c))] : baseCols;
       $('preview-head').innerHTML = '<tr>' + cols.map(c => `<th>${esc(c.replace(/_/g, ' '))}</th>`).join('') + '</tr>';
-      $('preview-body').innerHTML = rows.map(row => '<tr>' + cols.map(c => {
+      $('preview-body').innerHTML = rows.map(row => `<tr class="${row.needs_review === 'YES' ? 'review' : ''}">` + cols.map(c => {
         const val = row[c] ?? '';
         if (c === 'status' && val) return `<td><span class="status-badge status-${esc(val)}">${esc(val)}</span></td>`;
+        if (c === 'needs_review' && val) return '<td><span class="status-badge status-REVIEW">REVIEW</span></td>';
+        if (c === 'legibility' && val && val !== 'clear') return `<td><span class="leg leg-${esc(val)}">${esc(val)}</span></td>`;
         return `<td title="${esc(val)}">${esc(val)}</td>`;
       }).join('') + '</tr>').join('');
-      const count = s => rows.filter(r => r.status === s).length;
+      const count = s => all.filter(r => r.status === s).length;
+      const review = all.filter(r => r.needs_review === 'YES').length;
+      const unclearForms = new Set(all.filter(r => r.form_review_note).map(r => r.source_file)).size;
       $('stats').innerHTML = `
-        <div><div class="stat-value">${items.filter(i => i.state === 'done').length}</div><div class="stat-label">Forms read</div></div>
-        <div><div class="stat-value">${rows.length}</div><div class="stat-label">Rows</div></div>
-        <div><div class="stat-value">${count('CRITICAL') + count('NO_PERSONNEL')}</div><div class="stat-label">Understaffed resources</div></div>`;
+        <div><div class="stat-value">${allPages().filter(p => p.state === 'done').length}</div><div class="stat-label">Pages read</div></div>
+        <div><div class="stat-value">${all.length}</div><div class="stat-label">Rows</div></div>
+        <div><div class="stat-value">${count('CRITICAL') + count('NO_PERSONNEL')}</div><div class="stat-label">Understaffed resources</div></div>
+        <div><div class="stat-value" style="color:${review ? '#fbbf24' : 'inherit'}">${review}</div><div class="stat-label">Rows to review</div></div>`;
+      const bar = $('review-bar');
+      bar.classList.toggle('hidden', !review && !unclearForms);
+      $('review-text').innerHTML = (review ? `<b>${review} row${review === 1 ? '' : 's'}</b> had handwriting Gemini found hard to read. ` : '')
+        + (unclearForms ? `<b>${unclearForms} page${unclearForms === 1 ? '' : 's'}</b> had unclear header or approval fields (see <code>form_review_note</code>). ` : '')
+        + 'This is the model\'s own judgment, not a guarantee: check flagged values against the paper form.';
       renderUsage();
       $('results-card').classList.remove('hidden');
     }
 
-    // ---- Transparency: what these extractions cost in Gemini calls, tokens, time and money ----
+    // ---- Transparency: Gemini calls, tokens, time and cost for these pages ----
     let MODELS = {}, PRICING_SOURCE = null;
     function renderUsage() {
-      const used = items.filter(i => i.state === 'done' && i.usage).map(i => i.usage);
+      const used = allPages().filter(p => p.usage).map(p => p.usage);   // includes pages Gemini rejected (they still cost)
       const box = $('usage');
       if (!used.length) { box.classList.add('hidden'); return; }
       const sum = k => used.reduce((s, u) => s + (u[k] || 0), 0);
@@ -458,24 +684,30 @@
       const info = Object.values(MODELS).find(m => m.id === model) || {};
       const cost = sum('est_cost_usd');
       const free = info.free_tier;
+      const skipped = items.filter(i => i.kind === 'pdf' && i.status === 'ready').reduce((s, i) => s + i.pages.filter(p => !p.include).length, 0);
       box.innerHTML = `
         <div class="usage-grid">
-          <div><b>${used.length}</b><span>Gemini call${used.length === 1 ? '' : 's'}</span></div>
+          <div><b>${used.length}</b><span>Gemini call${used.length === 1 ? '' : 's'}${skipped ? ` · ${skipped} page${skipped === 1 ? '' : 's'} skipped (0 calls)` : ''}</span></div>
           <div><b>${(sum('tokens_in') + sum('tokens_out')).toLocaleString()}</b><span>tokens (${sum('tokens_in').toLocaleString()} in · ${sum('tokens_out').toLocaleString()} out)</span></div>
-          <div><b>${(sum('seconds') / used.length).toFixed(1)}s</b><span>average per form</span></div>
+          <div><b>${(sum('seconds') / used.length).toFixed(1)}s</b><span>average per page</span></div>
           <div><b>$${cost.toFixed(cost < 0.1 ? 4 : 2)}</b><span>est. cost at paid rates${free ? ' · $0 on a free-tier key' : ''}</span></div>
         </div>
-        <p>Model: <b>${esc(info.label || model)}</b> · exactly 1 call per form ·
+        <p>Model: <b>${esc(info.label || model)}</b> · exactly 1 call per ICS-204 page ·
           ${info.usd_per_1m?.input != null ? `$${info.usd_per_1m.input} in / $${info.usd_per_1m.output} out per 1M tokens` : ''}
           ${free === false ? ' · no free tier: billed to the key owner' : ''}
           ${PRICING_SOURCE ? ` · <a href="${esc(PRICING_SOURCE.url)}" target="_blank" rel="noopener">Google pricing</a>, read ${esc(PRICING_SOURCE.read)}` : ''}</p>`;
       box.classList.remove('hidden');
     }
 
-    // ---- Shrink big photos in the browser so uploads stay small ----
-    async function prepareFile(file) {
-      const isPdf = file.name.toLowerCase().endsWith('.pdf');
-      if (isPdf || file.size <= RESIZE_OVER) return file;
+    // ---- What gets uploaded: a photo (shrunk if big) or one rendered PDF page ----
+    async function prepareUpload(item, page) {
+      if (item.kind === 'pdf') {
+        const canvas = await renderPage(item.pdf, page.num, 2000);
+        const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
+        return new File([blob], `${item.file.name.replace(/\.pdf$/i, '')}_p${page.num}.jpg`, { type: 'image/jpeg' });
+      }
+      const file = item.file;
+      if (file.size <= RESIZE_OVER) return file;
       try {
         const bitmap = await createImageBitmap(file);
         const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
@@ -491,11 +723,12 @@
       }
     }
 
-    async function extractOne(item) {
-      item.state = 'working';
+    async function extractPage(item, page) {
+      page.state = 'working';
       updateUI();
+      const sourceName = item.kind === 'pdf' ? `${item.file.name} p.${page.num}` : item.file.name;
       try {
-        const upload = await prepareFile(item.file);
+        const upload = await prepareUpload(item, page);
         if (upload.size > MAX_UPLOAD) throw new Error(`Too large (${(upload.size / 1048576).toFixed(1)} MB). Max is ${MAX_UPLOAD / 1048576} MB.`);
         const fd = new FormData();
         fd.append('file', upload, upload.name);
@@ -506,33 +739,43 @@
         const res = await fetch('/api/extract', { method: 'POST', body: fd, headers });
         let data = {};
         try { data = await res.json(); } catch { /* non-JSON error page */ }
+        if (!res.ok && data.not_ics204) {          // Gemini's safety net: not a 204 after all
+          Object.assign(page, { state: 'rejected', message: data.error, usage: data.usage || null, include: false });
+          return;
+        }
         if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
-        item.rows = (data.rows || []).map(r => ({ ...r, source_file: item.file.name }));
-        item.usage = data.usage || null;
-        item.state = 'done';
+        page.rows = (data.rows || []).map(r => ({ ...r, source_file: sourceName }));
+        page.usage = data.usage || null;
+        page.review = data.needs_review || 0;
+        page.state = 'done';
       } catch (err) {
-        item.state = 'failed';
-        item.message = err.message || 'Failed';
+        page.state = 'failed';
+        page.message = err.message || 'Failed';
+      } finally {
+        updateUI();
+        renderResults();
       }
-      updateUI();
-      renderResults();
     }
 
     $('extract-btn').addEventListener('click', async () => {
       hideAlerts();
       busy = true;
       updateUI();
-      // One form at a time: friendlier to free-tier Gemini rate limits.
-      for (const item of items.filter(i => i.state === 'ready' || i.state === 'failed')) {
-        await extractOne(item);
-      }
+      // One page at a time: friendlier to free-tier Gemini rate limits.
+      for (const [item, page] of pendingJobs()) await extractPage(item, page);
       busy = false;
       updateUI();
-      const failed = items.filter(i => i.state === 'failed');
-      if (failed.length) showError(`${failed.length} form(s) failed. See the file list for details, then press Extract data to retry.`);
+      const pages = allPages();
+      const failed = pages.filter(p => p.state === 'failed').length;
+      const rejected = pages.filter(p => p.state === 'rejected').length;
+      const review = allRows().filter(r => r.needs_review === 'YES').length;
+      const problems = [];
+      if (failed) problems.push(`${failed} page(s) failed. See the file list, then press Extract data to retry only those.`);
+      if (rejected) problems.push(`${rejected} page(s) turned out not to be ICS-204s and were skipped.`);
+      if (problems.length) showError(problems.join(' '));
       if (allRows().length) {
         saveForMap();
-        showSuccess(`${allRows().length} row(s) ready. Press Download CSV to save, or see your incidents on the live map.`);
+        showSuccess(`${allRows().length} row(s) ready${review ? `, ${review} flagged for human review` : ''}. Press Download CSV to save, or see your incidents on the live map.`);
         $('success-alert').insertAdjacentHTML('beforeend', ' <a class="map-link" href="/#map">View on live map →</a>');
       }
     });
