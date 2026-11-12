@@ -470,7 +470,7 @@ Most of the code was written with AI assistance and then reviewed and tested by 
 7. **Fragile outside dependencies.** A preview Gemini model can be retired, the NIFC field names can change, and loose version ranges (`flask>=3.0`) can pull in breaking updates.
 8. **Heuristics.** Matching a form to the live map uses the incident name only, so two fires with similar names could match wrongly. The hotspot cache lives in one server instance, not shared.
 9. **Page detection is rule-based.** ICS-204 pages are found by keywords and printed labels. An unusual agency layout, or a scan too poor for OCR, can be missed or wrongly picked; the page picker and Gemini's `is_ics204` check are the safety nets.
-10. **Review flags are self-reported.** Gemini judges its own legibility. It's useful but not calibrated, and it can be confidently wrong. A ground-truth test set would let us measure how often flags catch real errors.
+10. **Review flags are self-reported and vary run to run.** Gemini judges its own legibility. It's useful but not calibrated, and it can be confidently wrong. On a blurred test form, Flash LOW and Pro HIGH flagged the hard rows 3/3 times, but Pro LOW only 2/5. A ground-truth test set, run several times per setting, would measure how often flags catch real errors.
 
 ---
 
