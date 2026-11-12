@@ -3,497 +3,926 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ICS-204 Form Extractor</title>
-  <meta name="description" content="Upload ICS-204 Assignment List forms and turn them into an organized CSV with Google Gemini.">
+  <script>
+    // Private access links (/?access=CODE) belong to the extractor; forward them there.
+    if (new URLSearchParams(location.search).has('access')) location.replace('/extract' + location.search);
+  </script>
+  <title>fifi · Fire Incident Form Intelligence</title>
+  <meta name="description" content="Turn ICS-204 Assignment Lists into structured data and see them beside the live US wildfire picture: incidents, perimeters and satellite hotspots.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
   <style>
     :root {
-      --bg: #0f1419;
-      --surface: #1a2332;
-      --surface-2: #243044;
-      --border: #2d3f56;
-      --text: #e8edf4;
-      --muted: #8b9cb3;
-      --accent: #e85d04;
-      --accent-hover: #f48c06;
-      --success: #2dc653;
-      --error: #ef476f;
-      --radius: 12px;
+      --bg: #0b0806;
+      --bg-2: #110c09;
+      --surface: #150f0b;
+      --surface-2: #211710;
+      --border: #3a271b;
+      --border-soft: #2a1c13;
+      --text: #f4ebe3;
+      --muted: #a8907f;
+      --dim: #6f5c4f;
+      --ember: #ff5a1f;
+      --flame: #ff8a3d;
+      --gold: #ffc93c;
+      --red: #ff3b30;
+      --ok: #34d07a;
+      --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+      --sans: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --radius: 10px;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { font-family: var(--sans); background: var(--bg); color: var(--text); line-height: 1.55; overflow-x: hidden; }
+    a { color: var(--flame); }
+    .mono { font-family: var(--mono); }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      line-height: 1.5;
+    /* ---------- nav ---------- */
+    .nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(11, 8, 6, 0.82); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border-soft);
     }
-
-    a { color: var(--accent-hover); }
-    code { background: var(--surface-2); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85em; }
-
-    .hero {
-      background: linear-gradient(135deg, #1a2332 0%, #0f1419 60%);
-      border-bottom: 1px solid var(--border);
-      padding: 2.5rem 1rem 2rem;
-    }
-
-    .hero-inner, .container { max-width: 900px; margin: 0 auto; }
-    .container { padding: 2rem 1rem 4rem; }
-
-    .logo { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
-    .logo-icon {
-      width: 40px; height: 40px; flex: none;
-      background: linear-gradient(135deg, var(--accent), #dc2f02);
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.25rem;
-    }
-
-    h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
-    .subtitle { color: var(--muted); font-size: 1rem; max-width: 600px; }
-
-    .steps { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1.25rem; color: var(--muted); font-size: 0.85rem; }
-    .steps span b { color: var(--text); }
-
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .card-title {
-      font-size: 0.85rem; font-weight: 600;
-      text-transform: uppercase; letter-spacing: 0.06em;
-      color: var(--muted);
-      margin-bottom: 1rem;
-    }
-
-    .key-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-    .key-row input[type=password], .key-row input[type=text] {
-      flex: 1 1 260px; min-width: 0;
-      background: var(--surface-2); color: var(--text);
-      border: 1px solid var(--border); border-radius: 8px;
-      padding: 0.7rem 0.85rem; font-size: 0.95rem; font-family: ui-monospace, Menlo, monospace;
-    }
-    .key-row input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-    .key-help { color: var(--muted); font-size: 0.85rem; margin-top: 0.75rem; }
-    .key-help label { display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; color: var(--text); }
-    .key-status { font-size: 0.85rem; margin-top: 0.5rem; }
-    .key-status.ok { color: #86efac; }
-
-    .formats { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
-    .format-badge {
-      background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
-      padding: 0.35rem 0.75rem; font-size: 0.8rem; font-weight: 600; color: var(--muted);
-    }
-
-    .dropzone {
-      border: 2px dashed var(--border); border-radius: var(--radius);
-      padding: 2.5rem 1.25rem; text-align: center; cursor: pointer;
-      transition: border-color 0.15s, background 0.15s; position: relative;
-    }
-    .dropzone:hover, .dropzone.dragover { border-color: var(--accent); background: rgba(232, 93, 4, 0.06); }
-    .dropzone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-    .dropzone-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
-    .dropzone p { color: var(--muted); font-size: 0.9rem; }
-    .dropzone strong { color: var(--accent); }
-
-    .file-list { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
-    .file-item {
-      display: flex; align-items: center; gap: 0.75rem;
-      background: var(--surface-2); border-radius: 8px;
-      padding: 0.5rem 0.75rem; font-size: 0.875rem;
-    }
-    .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .file-state { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
-    .file-state.done { color: #86efac; }
-    .file-state.failed { color: #fca5a5; white-space: normal; }
-    .file-item button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; }
-    .file-item button:hover { color: var(--error); }
-
-    .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.25rem; }
+    .nav .wrap { display: flex; align-items: center; gap: 1.5rem; height: 56px; }
+    .brand { font-family: var(--mono); font-weight: 600; font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); text-decoration: none; white-space: nowrap; }
+    .brand b { color: var(--ember); }
+    .brand span { color: var(--dim); font-weight: 400; }
+    .nav-links { display: flex; gap: 1.25rem; margin-left: auto; font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    .nav-links a { color: var(--muted); text-decoration: none; }
+    .nav-links a:hover { color: var(--text); }
     .btn {
-      padding: 0.75rem 1.5rem; border-radius: 8px; border: none;
-      font-size: 0.95rem; font-weight: 600; cursor: pointer;
       display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.7rem 1.2rem; border-radius: 8px; border: 1px solid transparent;
+      font-family: var(--mono); font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+      text-decoration: none; cursor: pointer; white-space: nowrap;
     }
-    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-    .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+    .btn-fire { background: linear-gradient(135deg, var(--ember), #d62e00); color: #fff; box-shadow: 0 0 24px rgba(255, 90, 31, 0.35); }
+    .btn-fire:hover { box-shadow: 0 0 34px rgba(255, 90, 31, 0.55); }
+    .btn-ghost { border-color: var(--border); color: var(--text); background: rgba(255,255,255,0.02); }
+    .btn-ghost:hover { border-color: var(--flame); }
+    .nav .btn { padding: 0.5rem 0.9rem; font-size: 0.72rem; }
 
-    .alert { padding: 0.875rem 1rem; border-radius: 8px; font-size: 0.875rem; margin-bottom: 1rem; }
-    .alert-error { background: rgba(239,71,111,0.12); border: 1px solid rgba(239,71,111,0.35); color: #fca5a5; }
-    .alert-success { background: rgba(45,198,83,0.12); border: 1px solid rgba(45,198,83,0.35); color: #86efac; }
-
-    .spinner {
-      width: 16px; height: 16px; display: inline-block; vertical-align: -3px;
-      border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
-      border-radius: 50%; animation: spin 0.7s linear infinite;
+    /* ---------- hero ---------- */
+    .hero { position: relative; padding: 72px 0 48px; overflow: hidden; }
+    .hero::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(ellipse 60% 50% at 80% 10%, rgba(255, 90, 31, 0.22), transparent 70%),
+        radial-gradient(ellipse 40% 40% at 10% 90%, rgba(255, 201, 60, 0.08), transparent 70%);
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .hero::after {
+      content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.35;
+      background-image: linear-gradient(var(--border-soft) 1px, transparent 1px), linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at 50% 30%, #000 20%, transparent 75%);
+    }
+    .hero .wrap { position: relative; z-index: 1; }
+    .kicker { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ember); margin-bottom: 1.1rem; }
+    .kicker i { color: var(--dim); font-style: normal; }
+    h1 { font-size: clamp(2.2rem, 6vw, 4.2rem); line-height: 1.04; letter-spacing: -0.03em; font-weight: 700; max-width: 900px; }
+    h1 em { font-style: normal; background: linear-gradient(90deg, var(--ember), var(--gold)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lede { color: var(--muted); font-size: clamp(1rem, 2.2vw, 1.2rem); max-width: 680px; margin-top: 1.25rem; }
+    .cta-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 2rem; }
 
-    .preview-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
-    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap; }
-    th { background: var(--surface-2); padding: 0.6rem 0.75rem; text-align: left; font-weight: 600; color: var(--muted); position: sticky; top: 0; }
-    td { padding: 0.55rem 0.75rem; border-top: 1px solid var(--border); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+    .readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; margin-top: 3rem; background: var(--border-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: hidden; }
+    .readout { background: var(--bg-2); padding: 1rem 1.1rem; }
+    .readout .v { font-family: var(--mono); font-size: 1.6rem; font-weight: 600; color: var(--text); }
+    .readout .v.hot { color: var(--flame); text-shadow: 0 0 18px rgba(255, 138, 61, 0.45); }
+    .readout .l { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-top: 0.2rem; }
+    .readout .s { font-size: 0.75rem; color: var(--dim); }
+    .chips { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1.25rem; }
+    .chip { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); }
+    .chip.live::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ember); margin-right: 0.45rem; vertical-align: 1px; box-shadow: 0 0 8px var(--ember); animation: pulse 1.6s infinite; }
+    @keyframes pulse { 50% { opacity: 0.35; } }
 
-    .status-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
-    .status-OK { background: rgba(45,198,83,0.2); color: #86efac; }
-    .status-CRITICAL, .status-NO_PERSONNEL { background: rgba(239,71,111,0.2); color: #fca5a5; }
-    .status-COMMUNICATION { background: rgba(59,130,246,0.2); color: #93c5fd; }
-    .status-NO_RESOURCES { background: rgba(139,156,179,0.2); color: var(--muted); }
+    /* ---------- sections ---------- */
+    section { padding: 72px 0; border-top: 1px solid var(--border-soft); }
+    .sec-label { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ember); margin-bottom: 0.75rem; }
+    .sec-label i { color: var(--dim); font-style: normal; }
+    h2 { font-size: clamp(1.6rem, 4vw, 2.6rem); line-height: 1.1; letter-spacing: -0.02em; max-width: 820px; }
+    .sec-lede { color: var(--muted); max-width: 720px; margin-top: 0.9rem; }
 
-    .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-    .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
-    .stat-label { font-size: 0.8rem; color: var(--muted); }
+    /* ---------- map ---------- */
+    #map-section { padding-top: 56px; }
+    .ops { display: grid; grid-template-columns: 320px 1fr; gap: 0; margin-top: 2rem; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+    .panel { border-right: 1px solid var(--border); max-height: 720px; overflow-y: auto; font-size: 0.85rem; }
+    .panel-sec { padding: 0.9rem 1rem; border-bottom: 1px solid var(--border-soft); }
+    .panel-h { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.6rem; display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+    .panel-h span { color: var(--dim); letter-spacing: 0.04em; text-transform: none; }
+    .layer { display: flex; align-items: center; gap: 0.6rem; padding: 0.3rem 0; cursor: pointer; }
+    .layer input { accent-color: var(--ember); }
+    .layer .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+    .layer .meta { margin-left: auto; font-family: var(--mono); font-size: 0.7rem; color: var(--dim); }
+    .ctl { margin: 0.55rem 0; }
+    .ctl label { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--muted); margin-bottom: 0.3rem; }
+    .ctl label b { font-family: var(--mono); color: var(--text); font-weight: 600; }
+    input[type=range] { width: 100%; accent-color: var(--ember); }
+    input[type=range].frp-ramp { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 3px; background: linear-gradient(90deg, #7a1d0b, #c1121f 20%, #ff4d00 40%, #ff8c1a 60%, #ffc93c 80%, #fff4d6); }
+    input[type=range].frp-ramp::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid var(--bg); cursor: pointer; }
+    input[type=range].frp-ramp::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid var(--bg); cursor: pointer; }
+    .seg { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .seg button { flex: 1; background: none; border: none; color: var(--muted); padding: 0.35rem 0.4rem; font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.04em; cursor: pointer; }
+    .seg button + button { border-left: 1px solid var(--border); }
+    .seg button.on { background: rgba(255, 90, 31, 0.16); color: var(--text); }
+    .field { width: 100%; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.45rem 0.6rem; font-family: var(--sans); font-size: 0.82rem; }
+    .field:focus { outline: 1px solid var(--ember); }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .check { display: flex; align-items: center; gap: 0.45rem; font-size: 0.78rem; color: var(--muted); margin-top: 0.5rem; cursor: pointer; }
+    .check input { accent-color: var(--ember); }
+    .count { font-family: var(--mono); font-size: 0.7rem; color: var(--dim); margin-top: 0.4rem; }
 
-    .privacy { color: var(--muted); font-size: 0.8rem; text-align: center; margin-top: 2rem; }
+    .inc-list { list-style: none; }
+    .inc-list li { display: grid; grid-template-columns: 8px 1fr auto; gap: 0.6rem; align-items: center; padding: 0.45rem 0.2rem; border-bottom: 1px dashed var(--border-soft); cursor: pointer; }
+    .inc-list li:hover { background: rgba(255, 90, 31, 0.06); }
+    .inc-list .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .inc-list .n { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .inc-list .sub { font-size: 0.72rem; color: var(--dim); font-family: var(--mono); }
+    .inc-list .ac { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); text-align: right; }
+    .mine-empty { font-size: 0.8rem; color: var(--muted); }
+    .mine-item { border: 1px solid var(--border); border-left: 3px solid var(--gold); border-radius: 6px; padding: 0.55rem 0.65rem; margin-top: 0.5rem; cursor: pointer; }
+    .mine-item:hover { border-color: var(--gold); }
+    .mine-item .t { font-weight: 600; display: flex; justify-content: space-between; gap: 0.5rem; }
+    .mine-item .t span { font-family: var(--mono); font-size: 0.68rem; font-weight: 400; }
+    .mine-item .d { font-size: 0.75rem; color: var(--muted); margin-top: 0.15rem; }
+    .tag-ok { color: var(--ok); }
+    .tag-no { color: var(--dim); }
 
-    .hidden { display: none !important; }
+    .map-wrap { position: relative; min-height: 720px; }
+    #map { position: absolute; inset: 0; background: #0d0a08; }
+    .hud { position: absolute; z-index: 2; font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.06em; color: var(--muted); background: rgba(11, 8, 6, 0.78); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.6rem; pointer-events: none; backdrop-filter: blur(4px); }
+    .hud b { color: var(--text); font-weight: 600; }
+    .hud-tl { top: 10px; left: 10px; }
+    .hud-tl .live { color: var(--ember); }
+    .hud-bl { bottom: 28px; left: 10px; }
+    .legend { position: absolute; z-index: 2; right: 10px; bottom: 40px; width: 220px; font-size: 0.72rem; background: rgba(11, 8, 6, 0.85); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.7rem; backdrop-filter: blur(4px); }
+    .legend h4 { font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0.15rem 0 0.35rem; }
+    .legend h4:not(:first-child) { margin-top: 0.6rem; }
+    .lg-row { display: flex; align-items: center; gap: 0.45rem; color: var(--muted); margin: 0.15rem 0; }
+    .lg-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+    .lg-ramp { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #7a1d0b, #c1121f 20%, #ff4d00 40%, #ff8c1a 60%, #ffc93c 80%, #fff4d6); }
+    .lg-scale { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.6rem; color: var(--dim); margin-top: 0.15rem; }
+    .map-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 2rem; color: var(--muted); font-family: var(--mono); font-size: 0.8rem; z-index: 3; pointer-events: none; }
+    .source-line { font-family: var(--mono); font-size: 0.68rem; color: var(--dim); margin-top: 0.75rem; }
+    .source-line .stale { color: var(--gold); }
+
+    /* MapLibre popup theme */
+    .maplibregl-popup-content { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 0.85rem; font-family: var(--sans); font-size: 0.8rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 300px; max-height: min(420px, 60vh); overflow-y: auto; }
+    .maplibregl-popup-tip { border-top-color: var(--border) !important; border-bottom-color: var(--border) !important; }
+    .maplibregl-popup-close-button { color: var(--muted); font-size: 1rem; }
+    .pop-k { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ember); }
+    .pop-t { font-size: 1rem; font-weight: 700; margin: 0.1rem 0 0.45rem; }
+    .pop-g { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.7rem; }
+    .pop-g dt { color: var(--muted); font-size: 0.74rem; }
+    .pop-g dd { font-family: var(--mono); font-size: 0.74rem; text-align: right; }
+    .pop-mine { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px dashed var(--border); }
+    .pop-mine .pop-k { color: var(--gold); }
+    .bar { height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin: 0.4rem 0 0.1rem; }
+    .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--ember), var(--gold)); }
+    .maplibregl-ctrl-group { background: var(--surface) !important; border: 1px solid var(--border); }
+    .maplibregl-ctrl-group button + button { border-top: 1px solid var(--border) !important; }
+    .maplibregl-ctrl-icon { filter: invert(0.85); }
+    .maplibregl-ctrl-attrib { background: rgba(11, 8, 6, 0.7) !important; color: var(--dim); font-size: 0.62rem; }
+    .maplibregl-ctrl-attrib a { color: var(--muted); }
+
+    /* ---------- features ---------- */
+    .grid-f { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1px; margin-top: 2.25rem; background: var(--border-soft); border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: hidden; }
+    .feat { background: var(--bg-2); padding: 1.4rem 1.3rem; }
+    .feat .k { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ember); }
+    .feat h3 { font-size: 1.1rem; margin: 0.35rem 0 0.4rem; }
+    .feat p { color: var(--muted); font-size: 0.9rem; }
+
+    /* ---------- pipeline ---------- */
+    .pipe { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; margin-top: 2.25rem; counter-reset: step; }
+    .step { position: relative; border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem; background: var(--surface); }
+    .step::before { counter-increment: step; content: "0" counter(step); font-family: var(--mono); font-size: 0.7rem; color: var(--ember); letter-spacing: 0.1em; }
+    .step h3 { font-size: 0.98rem; margin: 0.35rem 0 0.3rem; }
+    .step p { color: var(--muted); font-size: 0.82rem; }
+    .step:not(:last-child)::after { content: "→"; position: absolute; right: -0.65rem; top: 50%; transform: translateY(-50%); color: var(--ember); font-family: var(--mono); z-index: 1; }
+
+    /* ---------- IAP ---------- */
+    .iap { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; margin-top: 2.25rem; align-items: start; }
+    .iap p { color: var(--muted); margin-bottom: 0.9rem; }
+    .forms { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .form-row { display: grid; grid-template-columns: 72px 1fr auto; gap: 0.75rem; align-items: center; padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--border-soft); font-size: 0.88rem; background: var(--bg-2); }
+    .form-row:last-child { border-bottom: none; }
+    .form-row .id { font-family: var(--mono); font-weight: 600; color: var(--text); }
+    .form-row .nm { color: var(--muted); }
+    .form-row.on { background: linear-gradient(90deg, rgba(255, 90, 31, 0.14), var(--bg-2)); }
+    .form-row.on .nm { color: var(--text); }
+    .pill { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 0.2rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); color: var(--dim); white-space: nowrap; }
+    .pill.live { border-color: var(--ember); color: var(--ember); }
+    .pill.part { border-color: #7a5a20; color: var(--gold); }
+
+    /* ---------- sample table ---------- */
+    .sample { margin-top: 2rem; border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; }
+    .sample table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.74rem; white-space: nowrap; }
+    .sample th { text-align: left; padding: 0.55rem 0.75rem; color: var(--muted); background: var(--surface-2); font-weight: 600; }
+    .sample td { padding: 0.5rem 0.75rem; border-top: 1px solid var(--border-soft); }
+    .st { padding: 0.1rem 0.45rem; border-radius: 4px; font-weight: 600; }
+    .st-OK { background: rgba(52, 208, 122, 0.15); color: #86efac; }
+    .st-CRITICAL, .st-NO_PERSONNEL { background: rgba(255, 59, 48, 0.18); color: #fca5a5; }
+    .st-COMMUNICATION { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
+    .caption { font-family: var(--mono); font-size: 0.68rem; color: var(--dim); margin-top: 0.6rem; }
+
+    /* ---------- security ---------- */
+    .flow { display: grid; grid-template-columns: 1fr 70px 1fr 70px 1fr; align-items: stretch; margin-top: 2.25rem; }
+    .flow .node { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 1.1rem; }
+    .flow .node:nth-child(3) { border-color: var(--ember); box-shadow: 0 0 24px rgba(255, 90, 31, 0.15); }
+    .flow .nk { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ember); }
+    .flow h3 { font-size: 1rem; margin: 0.3rem 0 0.25rem; }
+    .flow p { color: var(--muted); font-size: 0.84rem; }
+    .flow .link { display: flex; align-items: center; justify-content: center; position: relative; }
+    .flow .link::before { content: ""; position: absolute; left: 6px; right: 6px; top: 50%; border-top: 1px dashed var(--flame); }
+    .flow .link span { position: relative; background: var(--bg); padding: 0 0.3rem; font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.1em; color: var(--flame); }
+    .store { margin-top: 1.5rem; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .store-row { display: grid; grid-template-columns: 1.1fr 2.4fr 1fr; gap: 1rem; padding: 0.8rem 1rem; border-top: 1px solid var(--border-soft); font-size: 0.88rem; background: var(--bg-2); color: var(--muted); }
+    .store-row b { color: var(--text); font-weight: 600; }
+    .store-row.head { border-top: none; background: var(--surface-2); font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.12em; text-transform: uppercase; }
+    .store-row .no { font-family: var(--mono); font-size: 0.78rem; color: var(--ok); }
+    .store-row .no::before { content: "✓ "; }
+    .sec-grid { margin-top: 1.5rem; }
+    .sec-grid code { font-family: var(--mono); font-size: 0.8em; background: var(--surface-2); padding: 0.05rem 0.3rem; border-radius: 4px; }
+
+    /* ---------- FAQ ---------- */
+    .faq { margin-top: 2rem; max-width: 860px; }
+    details { border-bottom: 1px solid var(--border-soft); padding: 1rem 0; }
+    summary { cursor: pointer; font-weight: 600; font-size: 1.02rem; list-style: none; display: flex; justify-content: space-between; gap: 1rem; }
+    summary::after { content: "+"; font-family: var(--mono); color: var(--ember); }
+    details[open] summary::after { content: "−"; }
+    details p { color: var(--muted); margin-top: 0.6rem; font-size: 0.93rem; }
+
+    /* ---------- closing ---------- */
+    .closing { text-align: center; padding: 96px 0; position: relative; overflow: hidden; }
+    .closing::before { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 50% 60% at 50% 100%, rgba(255, 90, 31, 0.25), transparent 70%); pointer-events: none; }
+    .closing h2 { margin: 0 auto; position: relative; }
+    .closing .cta-row { justify-content: center; position: relative; }
+    footer { border-top: 1px solid var(--border-soft); padding: 28px 0 40px; font-size: 0.78rem; color: var(--dim); }
+    footer .wrap { display: grid; gap: 0.6rem; }
+    footer .warn { color: var(--gold); }
+
+    /* ---------- responsive ---------- */
+    @media (max-width: 960px) {
+      .ops { grid-template-columns: 1fr; }
+      .panel { border-right: none; border-top: 1px solid var(--border); max-height: none; order: 2; }
+      .map-wrap { min-height: 60vh; order: 1; }
+      .pipe { grid-template-columns: 1fr; }
+      .step:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -0.95rem; transform: translateX(50%); }
+      .iap { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .flow .link { height: 44px; }
+      .flow .link::before { left: 50%; right: auto; top: 4px; bottom: 4px; border-top: none; border-left: 1px dashed var(--flame); }
+      .store-row { grid-template-columns: 1fr; gap: 0.25rem; }
+      .store-row.head { display: none; }
+      .legend { width: 180px; }
+    }
+    @media (max-width: 720px) {
+      .nav-links { display: none; }
+      .nav .wrap { justify-content: space-between; }
+      .hud-bl { display: none; }
+      .legend { bottom: auto; top: 46px; right: 8px; width: 160px; font-size: 0.66rem; }
+    }
   </style>
 </head>
 <body>
-  <header class="hero">
-    <div class="hero-inner">
-      <div class="logo">
-        <div class="logo-icon">🔥</div>
-        <h1>ICS-204 Form Extractor</h1>
-      </div>
-      <p class="subtitle">
-        Turn photos or scans of ICS-204 Assignment List forms, including handwritten ones, into an organized CSV you can sort and filter in Excel or Google Sheets.
-      </p>
-      <div class="steps">
-        <span><b>1.</b> Paste your Gemini key (or open your access link)</span>
-        <span><b>2.</b> Add forms</span>
-        <span><b>3.</b> Extract and download CSV</span>
-      </div>
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="/">🔥 <b>fifi</b> <span>// fire incident form intelligence</span></a>
+      <nav class="nav-links">
+        <a href="#map-section">Live map</a>
+        <a href="#how">How it works</a>
+        <a href="#iap">IAP</a>
+        <a href="#security">Security</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/buahomy/fifi" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+      <a class="btn btn-fire" href="/extract">Extract forms →</a>
     </div>
   </header>
 
-  <main class="container">
-    <div id="error-alert" class="alert alert-error hidden"></div>
-    <div id="success-alert" class="alert alert-success hidden"></div>
+  <main>
+    <!-- ================= HERO ================= -->
+    <div class="hero">
+      <div class="wrap">
+        <div class="kicker">ICS-204 → structured data <i>//</i> live wildfire picture</div>
+        <h1>From the clipboard to the <em>common operating picture</em>.</h1>
+        <p class="lede">
+          Snap a photo of an ICS-204 Assignment List, even a handwritten one. fifi reads every division, resource and radio channel,
+          flags understaffed crews, exports a clean CSV, and places your incident on a live map of US wildfires, perimeters and satellite heat detections.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-fire" href="/extract">Extract ICS-204 forms</a>
+          <a class="btn btn-ghost" href="#map-section">Open live fire map</a>
+        </div>
 
-    <div class="card hidden" id="access-card">
-      <div class="card-title">1 · Access</div>
-      <p class="key-status ok">✓ You're using a private access link, so no API key is needed. Go straight to uploading forms.</p>
-      <p class="key-help"><a href="#" id="forget-access">Stop using the access link on this device</a></p>
-    </div>
-
-    <div class="card" id="key-card">
-      <div class="card-title">1 · Your Gemini API key</div>
-      <div class="key-row">
-        <input type="password" id="api-key" placeholder="Paste your key (starts with AIza…)" autocomplete="off" spellcheck="false">
-        <button type="button" class="btn btn-secondary" id="toggle-key">Show</button>
-      </div>
-      <div class="key-status hidden" id="server-key-note"></div>
-      <p class="key-help">
-        Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
-        Your key is sent only with your own requests to Google and is never stored on this server.
-      </p>
-      <p class="key-help">
-        <label><input type="checkbox" id="remember-key"> Remember on this device</label>
-      </p>
-    </div>
-
-    <div class="card">
-      <div class="card-title">2 · Upload ICS-204 forms</div>
-      <div class="formats">
-        <span class="format-badge">JPG</span>
-        <span class="format-badge">PNG</span>
-        <span class="format-badge">WEBP</span>
-        <span class="format-badge">PDF</span>
-      </div>
-      <div class="dropzone" id="dropzone">
-        <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.webp,.pdf,image/png,image/jpeg,image/webp,application/pdf" multiple>
-        <div class="dropzone-icon">📋</div>
-        <p><strong>Click to browse</strong> or drag &amp; drop forms here</p>
-        <p>Photos are resized in your browser before upload · PDFs up to 4 MB</p>
-      </div>
-      <div class="file-list" id="file-list"></div>
-      <div class="actions">
-        <button type="button" class="btn btn-primary" id="extract-btn" disabled>Extract data</button>
-        <button type="button" class="btn btn-secondary" id="download-btn" disabled>Download CSV</button>
-        <button type="button" class="btn btn-secondary" id="clear-btn" disabled>Clear</button>
+        <div class="readouts" aria-live="polite">
+          <div class="readout"><div class="v hot" id="r-active">—</div><div class="l">Active wildfires</div><div class="s">not yet 100% contained</div></div>
+          <div class="readout"><div class="v" id="r-acres">—</div><div class="l">Acres burning</div><div class="s">across active wildfires</div></div>
+          <div class="readout"><div class="v hot" id="r-hot">—</div><div class="l">Satellite detections</div><div class="s">VIIRS, trailing 24 h</div></div>
+          <div class="readout"><div class="v" id="r-pers">—</div><div class="l">Personnel assigned</div><div class="s">reported on active wildfires</div></div>
+          <div class="readout"><div class="v" id="r-utc">--:--:--</div><div class="l">UTC</div><div class="s" id="r-updated">loading live feeds…</div></div>
+        </div>
+        <div class="chips">
+          <span class="chip live">Incidents · NIFC WFIGS</span>
+          <span class="chip live">Perimeters</span>
+          <span class="chip live">Hotspots · NASA FIRMS</span>
+          <span class="chip">Satellite imagery</span>
+          <span class="chip">Your ICS-204s</span>
+        </div>
       </div>
     </div>
 
-    <div class="card hidden" id="results-card">
-      <div class="card-title">3 · Extracted data</div>
-      <div class="stats" id="stats"></div>
-      <div class="preview-wrap">
-        <table>
-          <thead id="preview-head"></thead>
-          <tbody id="preview-body"></tbody>
-        </table>
+    <!-- ================= 01 LIVE MAP ================= -->
+    <section id="map-section">
+      <div class="wrap">
+        <div class="sec-label">01 <i>//</i> Live fire picture</div>
+        <h2>Every active US wildfire, its perimeter, and what the satellites saw in the last 24 hours.</h2>
+        <p class="sec-lede">Filter by size, containment, state and fire intensity. Click any incident for personnel, complexity, cause and cost. Forms you extract on this device show up in gold.</p>
+
+        <div class="ops">
+          <aside class="panel" aria-label="Map layers and filters">
+            <div class="panel-sec">
+              <div class="panel-h">Layers</div>
+              <label class="layer"><input type="checkbox" data-layer="incidents" checked><span class="sw" style="background:var(--red)"></span>Incidents<span class="meta" id="m-inc">…</span></label>
+              <label class="layer"><input type="checkbox" data-layer="perimeters" checked><span class="sw" style="background:rgba(255,90,31,.45);border:1px solid var(--ember)"></span>Perimeters<span class="meta" id="m-per">…</span></label>
+              <label class="layer"><input type="checkbox" data-layer="hotspots" checked><span class="sw" style="background:linear-gradient(90deg,#c1121f,#ffc93c)"></span>Satellite hotspots<span class="meta" id="m-hot">…</span></label>
+              <label class="layer"><input type="checkbox" data-layer="mine" checked><span class="sw" style="background:var(--gold)"></span>Your ICS-204s<span class="meta" id="m-mine">0</span></label>
+              <label class="layer"><input type="checkbox" data-layer="imagery"><span class="sw" style="background:#3b4a32"></span>Satellite imagery<span class="meta">Esri</span></label>
+            </div>
+
+            <div class="panel-sec">
+              <div class="panel-h">Incidents <span id="inc-count"></span></div>
+              <div class="ctl">
+                <div class="seg" id="type-seg">
+                  <button type="button" data-v="WF" class="on">Wildfire</button>
+                  <button type="button" data-v="RX">Prescribed</button>
+                  <button type="button" data-v="ALL">All</button>
+                </div>
+              </div>
+              <div class="ctl">
+                <label for="min-acres">Minimum size <b id="min-acres-v">any</b></label>
+                <input type="range" id="min-acres" min="0" max="6" step="1" value="0">
+              </div>
+              <div class="row2">
+                <select class="field" id="state-sel" aria-label="State"><option value="">All states</option></select>
+                <input class="field" id="search" type="search" placeholder="Search name…" aria-label="Search incidents">
+              </div>
+              <label class="check"><input type="checkbox" id="hide-contained" checked> Hide 100% contained</label>
+            </div>
+
+            <div class="panel-sec">
+              <div class="panel-h">Satellite hotspots <span id="hot-count"></span></div>
+              <div class="ctl">
+                <label for="min-frp">Minimum fire power <b id="min-frp-v">0 MW</b></label>
+                <input type="range" class="frp-ramp" id="min-frp" min="0" max="7" step="1" value="0">
+              </div>
+              <div class="ctl">
+                <div class="seg" id="conf-seg">
+                  <button type="button" data-v="all" class="on">All</button>
+                  <button type="button" data-v="n">Nominal+</button>
+                  <button type="button" data-v="h">High</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel-sec">
+              <div class="panel-h">Your ICS-204s <span>this device only</span></div>
+              <div id="mine-list"><p class="mine-empty">No forms yet. <a href="/extract">Extract an ICS-204</a> and its incident appears here and on the map.</p></div>
+            </div>
+
+            <div class="panel-sec">
+              <div class="panel-h">Largest incidents <span>click to fly</span></div>
+              <ul class="inc-list" id="inc-list"></ul>
+            </div>
+          </aside>
+
+          <div class="map-wrap">
+            <div id="map" role="region" aria-label="Live wildfire map"></div>
+            <div class="hud hud-tl"><span class="live">● LIVE</span> <b id="hud-utc">--:--:--</b> UTC · <span id="hud-shown">—</span></div>
+            <div class="hud hud-bl"><b id="hud-ll">--.----, ---.----</b> · z<b id="hud-z">-</b></div>
+            <div class="legend">
+              <h4>Incident containment</h4>
+              <div class="lg-row"><span class="lg-dot" style="background:#ff3b30"></span>&lt; 25%</div>
+              <div class="lg-row"><span class="lg-dot" style="background:#ff8a1f"></span>25–74%</div>
+              <div class="lg-row"><span class="lg-dot" style="background:#ffd166"></span>75–99%</div>
+              <div class="lg-row"><span class="lg-dot" style="background:#7d8a96"></span>100% / unknown</div>
+              <div class="lg-row"><span class="lg-dot" style="background:transparent;border:2px solid var(--gold)"></span>Your ICS-204</div>
+              <h4>Hotspot fire power (MW)</h4>
+              <div class="lg-ramp"></div>
+              <div class="lg-scale"><span>0</span><span>5</span><span>20</span><span>50</span><span>100</span><span>300+</span></div>
+            </div>
+            <div class="map-msg" id="map-msg">Loading live fire data…</div>
+          </div>
+        </div>
+        <p class="source-line" id="source-line">Sources: NIFC WFIGS current incidents &amp; perimeters · NASA FIRMS VIIRS (NOAA-20, NOAA-21)</p>
+      </div>
+    </section>
+
+    <!-- ================= 02 WHAT IT DOES ================= -->
+    <section id="what">
+      <div class="wrap">
+        <div class="sec-label">02 <i>//</i> What it does</div>
+        <h2>The 204 is already on the clipboard. fifi turns it into data you can sort, share and map.</h2>
+        <div class="grid-f">
+          <div class="feat"><div class="k">Read</div><h3>Handwriting included</h3><p>Photos, scans or PDFs. Crossed-out names, red-ink swaps and margin notes are read, not skipped.</p></div>
+          <div class="feat"><div class="k">Structure</div><h3>A fixed ICS-204 schema</h3><p>Gemini fills the same JSON fields every time: header, operations personnel, resources, work assignment, comms, approvals.</p></div>
+          <div class="feat"><div class="k">Organize</div><h3>One row per resource</h3><p>Each row carries the incident, period and division, so it still makes sense after you sort or filter.</p></div>
+          <div class="feat"><div class="k">Flag</div><h3>Staffing at a glance</h3><p>Resources with one person are <b>CRITICAL</b>, none is <b>NO_PERSONNEL</b>. Counted per incident on the map.</p></div>
+          <div class="feat"><div class="k">Comms</div><h3>Radio plan captured</h3><p>Function, channel, RX/TX frequencies and tones come out as their own rows for the comms unit.</p></div>
+          <div class="feat"><div class="k">Map</div><h3>Matched to the live incident</h3><p>Extracted incidents are matched by name to the national feed and highlighted, with your form totals beside official ones.</p></div>
+          <div class="feat"><div class="k">Export</div><h3>CSV for Excel &amp; Sheets</h3><p>Built in your browser from one extraction, so nothing is processed twice. Formula-safe cells.</p></div>
+          <div class="feat"><div class="k">Access</div><h3>Bring a key, or a link</h3><p>Use your own free Gemini key, or a private access link from the site owner. Keys are never stored on the server.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 03 HOW ================= -->
+    <section id="how">
+      <div class="wrap">
+        <div class="sec-label">03 <i>//</i> How it works</div>
+        <h2>Five steps from a phone photo to a row in your spreadsheet.</h2>
+        <div class="pipe">
+          <div class="step"><h3>Capture</h3><p>Photo, scan or PDF of the ICS-204. Big photos are resized in your browser.</p></div>
+          <div class="step"><h3>Read</h3><p>Google Gemini vision reads the form against a fixed JSON schema.</p></div>
+          <div class="step"><h3>Flatten</h3><p>Nested sections become rows: one per resource and one per comms entry.</p></div>
+          <div class="step"><h3>Flag</h3><p>Staffing status per resource. Understaffed crews counted per incident.</p></div>
+          <div class="step"><h3>Use</h3><p>Preview, download the CSV, and see the incident on the live map.</p></div>
+        </div>
+
+        <div class="sample">
+          <table>
+            <thead><tr><th>source_file</th><th>incident_name</th><th>division_group</th><th>resource_designator</th><th>resource_leader</th><th>num_persons</th><th>comm_channel</th><th>status</th></tr></thead>
+            <tbody>
+              <tr><td>div-a.jpg</td><td>EXAMPLE CREEK</td><td>DIV A</td><td>E-21 ENGINE 21</td><td>J. RIVERA</td><td>3</td><td></td><td><span class="st st-OK">OK</span></td></tr>
+              <tr><td>div-a.jpg</td><td>EXAMPLE CREEK</td><td>DIV A</td><td>WT-4 WATER TENDER</td><td>K. OSEI</td><td>1</td><td></td><td><span class="st st-CRITICAL">CRITICAL</span></td></tr>
+              <tr><td>div-a.jpg</td><td>EXAMPLE CREEK</td><td>DIV A</td><td>DZ-2 DOZER</td><td></td><td>0</td><td></td><td><span class="st st-NO_PERSONNEL">NO_PERSONNEL</span></td></tr>
+              <tr><td>div-a.jpg</td><td>EXAMPLE CREEK</td><td>DIV A</td><td></td><td></td><td></td><td>TAC 4</td><td><span class="st st-COMMUNICATION">COMMUNICATION</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">Illustrative example, not a real incident. The real CSV has 33 columns, including period, supervisors, task, frequencies and approvals.</p>
+      </div>
+    </section>
+
+    <!-- ================= 04 IAP ================= -->
+    <section id="iap">
+      <div class="wrap">
+        <div class="sec-label">04 <i>//</i> Inside the IAP</div>
+        <h2>The ICS-204 is where the Incident Action Plan meets the fireline.</h2>
+        <div class="iap">
+          <div>
+            <p>Each operational period, the planning section publishes an <strong>Incident Action Plan (IAP)</strong>: a packet of standard ICS forms covering objectives, organization, assignments, communications, medical and safety.</p>
+            <p>The <strong>ICS-204 Assignment List</strong> is the page crews actually carry. One per division or group, it lists who is assigned, how many people, where they're dropped off and picked up, the task, special instructions and the radio channels to use.</p>
+            <p>That makes it the richest snapshot of staffing on the ground, and the hardest to aggregate, because it lives on paper and changes by hand. fifi starts there and is built to grow into the rest of the IAP.</p>
+          </div>
+          <div class="forms">
+            <div class="form-row"><span class="id">ICS 202</span><span class="nm">Incident Objectives</span><span class="pill">Roadmap</span></div>
+            <div class="form-row"><span class="id">ICS 203</span><span class="nm">Organization Assignment List</span><span class="pill">Roadmap</span></div>
+            <div class="form-row on"><span class="id">ICS 204</span><span class="nm">Assignment List</span><span class="pill live">Supported</span></div>
+            <div class="form-row"><span class="id">ICS 205</span><span class="nm">Incident Radio Communications Plan</span><span class="pill part">Via 204 comms</span></div>
+            <div class="form-row"><span class="id">ICS 205A</span><span class="nm">Communications List</span><span class="pill">Roadmap</span></div>
+            <div class="form-row"><span class="id">ICS 206</span><span class="nm">Medical Plan</span><span class="pill">Roadmap</span></div>
+            <div class="form-row"><span class="id">ICS 207</span><span class="nm">Incident Organization Chart</span><span class="pill">Roadmap</span></div>
+            <div class="form-row"><span class="id">ICS 208</span><span class="nm">Safety Message / Plan</span><span class="pill">Roadmap</span></div>
+            <div class="form-row"><span class="id">ICS 220</span><span class="nm">Air Operations Summary</span><span class="pill">Roadmap</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 05 SECURITY ================= -->
+    <section id="security">
+      <div class="wrap">
+        <div class="sec-label">05 <i>//</i> Security &amp; privacy</div>
+        <h2>Your key and your forms pass through. Nothing stays.</h2>
+        <p class="sec-lede">IAPs and ICS-204s can hold names, phone numbers and locations. fifi has no database and no file storage, so there is nowhere for them to be kept.</p>
+
+        <div class="flow" aria-label="Where your data goes">
+          <div class="node"><div class="nk">You</div><h3>Your browser</h3><p>Shrinks photos. Holds your results and CSV.</p></div>
+          <div class="link"><span>HTTPS</span></div>
+          <div class="node"><div class="nk">fifi server</div><h3>Memory only</h3><p>About 10 seconds per form. No disk, no database, no logs of content.</p></div>
+          <div class="link"><span>HTTPS</span></div>
+          <div class="node"><div class="nk">Google</div><h3>Gemini API</h3><p>Reads the form and returns the fields, under Google's API terms.</p></div>
+        </div>
+
+        <div class="store">
+          <div class="store-row head"><span>What</span><span>Where it lives</span><span>Stored on fifi's server?</span></div>
+          <div class="store-row"><span><b>Your Gemini API key</b></span><span>Typed into your browser, sent only with your own requests. Kept in your browser only if you tick "Remember on this device".</span><span class="no">Never</span></div>
+          <div class="store-row"><span><b>Form photos, scans, PDFs</b></span><span>In server memory during your request (max 4 MB), then gone when it ends. Never written to disk.</span><span class="no">Never</span></div>
+          <div class="store-row"><span><b>Extracted data &amp; CSV</b></span><span>Sent back to your browser. The CSV is built and downloaded there. The map summary sits in your browser until you clear it.</span><span class="no">Never</span></div>
+          <div class="store-row"><span><b>Private access link</b></span><span>The site owner's key is an encrypted setting on the host. Your browser only ever holds the access code.</span><span class="no">Owner's key stays server-side</span></div>
+        </div>
+
+        <div class="grid-f sec-grid">
+          <div class="feat"><div class="k">Verify</div><h3>Open source</h3><p>Every line is on <a href="https://github.com/buahomy/fifi" target="_blank" rel="noopener">GitHub</a>. Uploads are held in memory by design (<code>InMemoryRequest</code> in <code>app.py</code>), and nothing logs keys or content.</p></div>
+          <div class="feat"><div class="k">Know</div><h3>Google sees the form</h3><p>Reading the form is Gemini's job, so Google receives it. On <b>free</b> Gemini keys, Google may use content to improve its products. <b>Paid</b> keys are not used for training.</p></div>
+          <div class="feat"><div class="k">Advice</div><h3>For confidential IAPs</h3><p>Use a paid Gemini key or your agency's own. Don't tick "Remember" on shared computers, and clear the map summary when you're done.</p></div>
+          <div class="feat"><div class="k">Control</div><h3>Wipe it anytime</h3><p>Untick "Remember on this device" to forget your key. Press "Clear from this device" in the map panel to remove your incident summaries.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 06 FAQ ================= -->
+    <section id="faq">
+      <div class="wrap">
+        <div class="sec-label">06 <i>//</i> FAQ</div>
+        <h2>Questions</h2>
+        <div class="faq">
+          <details><summary>Is fifi free?</summary><p>Yes. The site is free and open source. Extraction uses Google Gemini, so you either paste your own Gemini API key (Google AI Studio offers a free tier) or use a private access link from the site owner.</p></details>
+          <details><summary>Where does the map data come from?</summary><p>Incidents and perimeters come from the National Interagency Fire Center's WFIGS public feeds (current incidents). Hotspots are NASA FIRMS VIIRS detections from the NOAA-20 and NOAA-21 satellites over the trailing 24 hours. Satellite imagery is Esri World Imagery. Nothing on the map needs a key.</p></details>
+          <details><summary>What is a "hotspot", and is every hotspot a wildfire?</summary><p>A hotspot is a satellite pixel (about 375 m) that was unusually hot during an overpass. Fire radiative power (MW) is how intense it was. Most are vegetation fires, but some are prescribed burns, agricultural burning, flares or industrial heat. Use the confidence and power filters to cut noise.</p></details>
+          <details><summary>Are my forms or my API key stored?</summary><p>No. Each form is held in server memory only while Gemini reads it, then discarded; it is never written to disk or a database. Your key is used for that one request and never saved on the server. See <a href="#security">Security &amp; privacy</a> for exactly where everything goes.</p></details>
+          <details><summary>How accurate is the extraction?</summary><p>Gemini reads typed and handwritten forms well, but smudged, faint or crossed-out entries can still be misread. Always review the CSV before using it for decisions.</p></details>
+          <details><summary>How does "matched to the live incident" work?</summary><p>fifi compares the incident name on your form with names in the national feed, ignoring case, punctuation and words like "Fire" or "Complex". If there's a match, the incident gets a gold ring and your form totals appear in its popup. Small or local incidents may not be in the national feed.</p></details>
+          <details><summary>Is this an official NWCG, FEMA or agency tool?</summary><p>No. fifi is an independent student project. For evacuations and official information, follow your local agencies and InciWeb.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= CLOSING ================= -->
+    <div class="closing">
+      <div class="wrap">
+        <div class="sec-label">fifi <i>//</i> fire incident form intelligence</div>
+        <h2>Paper on the line. Data in the plan.</h2>
+        <div class="cta-row" style="margin-top:1.75rem">
+          <a class="btn btn-fire" href="/extract">Extract ICS-204 forms</a>
+          <a class="btn btn-ghost" href="https://github.com/buahomy/fifi" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
       </div>
     </div>
-
-    <p class="privacy">
-      Forms are sent to Google Gemini for reading and are not saved by this site. Always review the extracted data before using it for operations.
-    </p>
   </main>
 
-  <script>
-    const ALLOWED = ['.png', '.jpg', '.jpeg', '.webp', '.pdf'];
-    const KEY_STORAGE = 'ics204_gemini_key';
-    const MAX_SIDE = 2400;          // longest side of a resized photo, in pixels
-    const RESIZE_OVER = 1.5e6;      // only re-encode photos bigger than ~1.5 MB
-    let MAX_UPLOAD = 4 * 1024 * 1024;
-    let COLUMNS = [];
+  <footer>
+    <div class="wrap">
+      <div class="warn">⚠ Not for emergency use. Map data can be delayed or incomplete; always confirm with official sources.</div>
+      <div>Data: NIFC WFIGS (incidents, perimeters) · NASA FIRMS (VIIRS NOAA-20/21) · Basemap © CARTO, © OpenStreetMap contributors · Imagery © Esri, Maxar, Earthstar Geographics · Extraction by Google Gemini.</div>
+      <div>Map layer ideas (fire-power color ramp, intensity and confidence filters, heatmap at continental zoom) adapted from the MIT-licensed <a href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noopener">God's Eye View</a> project.</div>
+    </div>
+  </footer>
 
-    // items: { file, state: 'ready'|'working'|'done'|'failed', message, rows }
-    let items = [];
-    let busy = false;
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script>
+  (() => {
+    const WFIGS = 'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services';
+    const INC_FIELDS = ['IncidentName', 'UniqueFireIdentifier', 'IncidentSize', 'PercentContained', 'POOState', 'POOCounty',
+      'IncidentTypeCategory', 'FireDiscoveryDateTime', 'FireCause', 'FireBehaviorGeneral', 'TotalIncidentPersonnel',
+      'EstimatedCostToDate', 'IncidentComplexityLevel', 'ModifiedOnDateTime_dt'].join(',');
+    const INC_URL = `${WFIGS}/WFIGS_Incident_Locations_Current/FeatureServer/0/query?` + new URLSearchParams({
+      where: "IncidentTypeCategory IN ('WF','RX')", outFields: INC_FIELDS, outSR: '4326', resultRecordCount: '2000', f: 'geojson' });
+    const PER_URL = `${WFIGS}/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query?` + new URLSearchParams({
+      where: "attr_IncidentTypeCategory = 'WF'", outFields: 'poly_IncidentName,attr_UniqueFireIdentifier,attr_IncidentSize,attr_PercentContained',
+      maxAllowableOffset: '0.001', geometryPrecision: '5', outSR: '4326', f: 'geojson' });
+
+    const ACRE_STEPS = [0, 10, 100, 1000, 10000, 50000, 100000];
+    const FRP_STEPS = [0, 1, 5, 10, 20, 50, 100, 300];
+    const FRP_RAMP = [0, '#7a1d0b', 5, '#c1121f', 20, '#ff4d00', 50, '#ff8c1a', 100, '#ffc93c', 300, '#fff4d6'];
 
     const $ = id => document.getElementById(id);
-    const keyInput = $('api-key');
-    const rememberBox = $('remember-key');
-
-    const esc = v => String(v ?? '').replace(/[&<>"']/g, c =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-    // ---- API key (kept in this browser only) ----
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const num = n => n == null || isNaN(n) ? '—' : Math.round(n).toLocaleString('en-US');
+    const compact = n => n == null || isNaN(n) ? '—' : new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+    const money = n => n ? '$' + compact(n) : '—';
+    const date = ms => ms ? new Date(ms).toISOString().slice(0, 10) : '—';
+    const ago = ms => {
+      if (!ms) return '—';
+      const h = Math.round((Date.now() - ms) / 3.6e6);
+      return h < 1 ? 'just now' : h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+    };
+    const containColor = p => p == null ? '#7d8a96' : p >= 100 ? '#7d8a96' : p >= 75 ? '#ffd166' : p >= 25 ? '#ff8a1f' : '#ff3b30';
+    const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ')
+      .replace(/\b(FIRE|FIRES|COMPLEX|INCIDENT|WILDFIRE)\b/g, ' ').replace(/\s+/g, ' ').trim();
     function storage(fn) { try { return fn(window.localStorage); } catch { return null; } }
-    const saved = storage(s => s.getItem(KEY_STORAGE));
-    if (saved) { keyInput.value = saved; rememberBox.checked = true; }
 
-    function persistKey() {
-      const key = keyInput.value.trim();
-      storage(s => rememberBox.checked && key ? s.setItem(KEY_STORAGE, key) : s.removeItem(KEY_STORAGE));
-      updateUI();
+    // ---------- clocks ----------
+    function tick() {
+      const t = new Date().toISOString().slice(11, 19);
+      $('r-utc').textContent = t;
+      $('hud-utc').textContent = t;
     }
-    keyInput.addEventListener('input', persistKey);
-    rememberBox.addEventListener('change', persistKey);
-    $('toggle-key').addEventListener('click', () => {
-      const show = keyInput.type === 'password';
-      keyInput.type = show ? 'text' : 'password';
-      $('toggle-key').textContent = show ? 'Hide' : 'Show';
-    });
+    tick(); setInterval(tick, 1000);
 
-    // ---- Private access link (?access=CODE): uses the site owner's key ----
-    const ACCESS_STORAGE = 'ics204_access_code';
-    let accessCode = '';
-    let serverKey = false;   // true when the server key can be used without a key of your own
+    // ---------- state ----------
+    const state = {
+      type: 'WF', minAcres: 0, state: '', q: '', hideContained: true,
+      minFrp: 0, conf: 'all',
+      layers: { incidents: true, perimeters: true, hotspots: true, mine: true, imagery: false },
+    };
+    let incidents = [], perimeters = null, hotspots = [], hotMeta = null, mine = [];
+    let map = null, mapReady = false;
 
-    function showAccess(on) {
-      $('access-card').classList.toggle('hidden', !on);
-      $('key-card').classList.toggle('hidden', on);
+    // ---------- data ----------
+    const fetchJson = (url, ms = 25000) => fetch(url, { signal: AbortSignal.timeout(ms) }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+
+    function loadMine() {
+      const raw = storage(s => s.getItem('fifi_my_incidents'));
+      try { mine = JSON.parse(raw || '[]'); } catch { mine = []; }
     }
 
-    $('forget-access').addEventListener('click', e => {
-      e.preventDefault();
-      accessCode = '';
-      serverKey = false;
-      storage(s => s.removeItem(ACCESS_STORAGE));
-      showAccess(false);
-      updateUI();
-    });
-
-    async function setupAccess(cfg) {
-      const params = new URLSearchParams(location.search);
-      const fromLink = params.get('access');
-      if (fromLink) {
-        // Remove the code from the address bar so it isn't left in history or screenshots.
-        params.delete('access');
-        history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '') + location.hash);
+    function matchMine() {
+      const byNorm = {};
+      for (const f of incidents) {
+        const k = norm(f.properties.IncidentName);
+        if (!k) continue;
+        (byNorm[k] ||= []).push(f);
       }
-      const candidate = (fromLink || storage(s => s.getItem(ACCESS_STORAGE)) || '').trim();
-      if (!cfg.server_key) return;
-      if (!cfg.access_code_required) {        // local setup with an open server key
-        serverKey = true;
-        const note = $('server-key-note');
-        note.textContent = 'This server has a key set up, so a key of your own is optional.';
-        note.classList.add('ok');
-        note.classList.remove('hidden');
+      for (const m of mine) {
+        const k = norm(m.incident_name);
+        let cands = byNorm[k] || [];
+        if (!cands.length && k.length >= 4) {
+          cands = incidents.filter(f => { const n = norm(f.properties.IncidentName); return n.length >= 4 && (n.includes(k) || k.includes(n)); });
+        }
+        // Prefer an uncontained wildfire, then the largest.
+        cands.sort((a, b) => ((a.properties.PercentContained ?? 0) >= 100) - ((b.properties.PercentContained ?? 0) >= 100)
+          || (b.properties.IncidentSize || 0) - (a.properties.IncidentSize || 0));
+        m.match = cands[0] || null;
+      }
+    }
+
+    // ---------- filtering (applied once; map, list and counters all use the result) ----------
+    function filteredIncidents() {
+      const q = state.q.trim().toUpperCase();
+      return incidents.filter(f => {
+        const p = f.properties;
+        if (state.type !== 'ALL' && p.IncidentTypeCategory !== state.type) return false;
+        if ((p.IncidentSize || 0) < state.minAcres) return false;
+        if (state.hideContained && p.PercentContained >= 100) return false;
+        if (state.state && p.POOState !== state.state) return false;
+        if (q && !String(p.IncidentName || '').toUpperCase().includes(q)) return false;
+        return true;
+      });
+    }
+    function filteredHotspots() {
+      return hotspots.filter(p => p[2] >= state.minFrp &&
+        (state.conf === 'all' || (state.conf === 'n' ? p[3] === 'n' || p[3] === 'h' : p[3] === 'h')));
+    }
+
+    const fc = features => ({ type: 'FeatureCollection', features });
+
+    function render() {
+      const inc = filteredIncidents();
+      const hot = filteredHotspots();
+      $('inc-count').textContent = `${inc.length} of ${incidents.filter(f => state.type === 'ALL' || f.properties.IncidentTypeCategory === state.type).length}`;
+      $('hot-count').textContent = `${num(hot.length)} of ${num(hotspots.length)}`;
+      $('m-inc').textContent = num(inc.length);
+      $('m-hot').textContent = compact(hot.length);
+      $('hud-shown').textContent = `${num(inc.length)} incidents · ${compact(hot.length)} hotspots`;
+      renderList(inc);
+      renderMine();
+      if (!mapReady) return;
+      map.getSource('incidents').setData(fc(inc));
+      map.getSource('hotspots').setData(fc(hot.map(p => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p[0], p[1]] },
+        properties: { frp: p[2], conf: p[3], t: p[4], dn: p[5], sat: p[6] } }))));
+      map.getSource('mine').setData(fc(mine.filter(m => m.match).map(m => ({ ...m.match, properties: { ...m.match.properties, mine: m.incident_name } }))));
+    }
+
+    function renderList(inc) {
+      const top = [...inc].sort((a, b) => (b.properties.IncidentSize || 0) - (a.properties.IncidentSize || 0)).slice(0, 40);
+      $('inc-list').innerHTML = top.length ? top.map(f => {
+        const p = f.properties;
+        return `<li data-id="${esc(p.UniqueFireIdentifier)}">
+          <span class="dot" style="background:${containColor(p.PercentContained)}"></span>
+          <span><div class="n">${esc(p.IncidentName)}</div><div class="sub">${esc((p.POOState || '').replace('US-', ''))} · ${p.PercentContained == null ? '?' : p.PercentContained}% contained</div></span>
+          <span class="ac">${compact(p.IncidentSize)} ac</span></li>`;
+      }).join('') : '<li style="cursor:default;grid-template-columns:1fr;color:var(--dim)">No incidents match these filters.</li>';
+    }
+
+    function renderMine() {
+      $('m-mine').textContent = mine.length;
+      if (!mine.length) return;
+      $('mine-list').innerHTML = mine.map((m, i) => `
+        <div class="mine-item" data-mine="${i}">
+          <div class="t">${esc(m.incident_name)} <span class="${m.match ? 'tag-ok' : 'tag-no'}">${m.match ? '● matched' : '○ not in feed'}</span></div>
+          <div class="d">${m.resources} resources · ${m.personnel} people · <b style="color:${m.understaffed ? '#fca5a5' : 'var(--muted)'}">${m.understaffed} understaffed</b></div>
+          <div class="d">${esc((m.divisions || []).slice(0, 3).join(', ') || 'No division listed')}${m.match ? ` · official: ${compact(m.match.properties.IncidentSize)} ac` : ''}</div>
+        </div>`).join('') + `<p class="count"><a href="#" id="clear-mine">Clear from this device</a></p>`;
+    }
+
+    function updateReadouts() {
+      const active = incidents.filter(f => f.properties.IncidentTypeCategory === 'WF' && !(f.properties.PercentContained >= 100));
+      $('r-active').textContent = num(active.length);
+      $('r-acres').textContent = compact(active.reduce((s, f) => s + (f.properties.IncidentSize || 0), 0));
+      $('r-pers').textContent = num(active.reduce((s, f) => s + (f.properties.TotalIncidentPersonnel || 0), 0));
+    }
+
+    function populateStates() {
+      const states = [...new Set(incidents.map(f => f.properties.POOState).filter(Boolean))].sort();
+      $('state-sel').innerHTML = '<option value="">All states</option>' + states.map(s => `<option value="${esc(s)}">${esc(s.replace('US-', ''))}</option>`).join('');
+    }
+
+    // ---------- popups ----------
+    function incidentPopup(p) {
+      const m = mine.find(x => x.match && x.match.properties.UniqueFireIdentifier === p.UniqueFireIdentifier);
+      const pct = p.PercentContained;
+      return `<div class="pop-k">${p.IncidentTypeCategory === 'RX' ? 'Prescribed fire' : 'Wildfire'} · ${esc(p.UniqueFireIdentifier || '')}</div>
+        <div class="pop-t">${esc(p.IncidentName)}</div>
+        ${pct != null ? `<div class="bar"><i style="width:${Math.min(100, pct)}%"></i></div><div class="pop-g"><dt>Contained</dt><dd>${pct}%</dd></div>` : ''}
+        <dl class="pop-g">
+          <dt>Size</dt><dd>${num(p.IncidentSize)} ac</dd>
+          <dt>Location</dt><dd>${esc([p.POOCounty, (p.POOState || '').replace('US-', '')].filter(Boolean).join(', ') || '—')}</dd>
+          <dt>Personnel</dt><dd>${num(p.TotalIncidentPersonnel)}</dd>
+          <dt>Complexity</dt><dd>${esc(p.IncidentComplexityLevel || '—')}</dd>
+          <dt>Behavior</dt><dd>${esc(p.FireBehaviorGeneral || '—')}</dd>
+          <dt>Cause</dt><dd>${esc(p.FireCause || '—')}</dd>
+          <dt>Est. cost</dt><dd>${money(p.EstimatedCostToDate)}</dd>
+          <dt>Discovered</dt><dd>${date(p.FireDiscoveryDateTime)}</dd>
+          <dt>Updated</dt><dd>${ago(p.ModifiedOnDateTime_dt)}</dd>
+        </dl>
+        ${m ? `<div class="pop-mine"><div class="pop-k">Your ICS-204s · ${m.forms} form(s)</div>
+          <dl class="pop-g"><dt>Resources</dt><dd>${m.resources}</dd><dt>People on forms</dt><dd>${m.personnel}</dd>
+          <dt>Understaffed</dt><dd style="color:${m.understaffed ? '#fca5a5' : 'inherit'}">${m.understaffed}</dd>
+          <dt>Divisions</dt><dd>${esc((m.divisions || []).join(', ') || '—')}</dd>
+          ${m.channels?.length ? `<dt>Channels</dt><dd>${esc(m.channels.join(', '))}</dd>` : ''}</dl></div>` : ''}`;
+    }
+    function hotspotPopup(p) {
+      const conf = { h: 'High', n: 'Nominal', l: 'Low' }[p.conf] || '—';
+      return `<div class="pop-k">Satellite hotspot · ${esc(p.sat)}</div>
+        <div class="pop-t">${p.frp} MW</div>
+        <dl class="pop-g"><dt>Confidence</dt><dd>${conf}</dd><dt>Detected</dt><dd>${esc(String(p.t).replace('T', ' ').replace(/(\d{2})(\d{2})Z$/, '$1:$2 UTC'))}</dd>
+        <dt>Pass</dt><dd>${p.dn === 'D' ? 'Day' : p.dn === 'N' ? 'Night' : '—'}</dd></dl>`;
+    }
+
+    // ---------- map ----------
+    function initMap() {
+      if (!window.maplibregl) { $('map-msg').textContent = 'The map library could not load. Check your connection and refresh.'; return; }
+      map = new maplibregl.Map({
+        container: 'map',
+        style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+        center: [-112, 40], zoom: 3.4, minZoom: 2, maxZoom: 15,
+        attributionControl: { compact: true },
+        cooperativeGestures: matchMedia('(max-width: 720px)').matches,
+      });
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+      map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-left');
+
+      map.on('mousemove', e => { $('hud-ll').textContent = `${e.lngLat.lat.toFixed(4)}, ${e.lngLat.lng.toFixed(4)}`; });
+      const showZoom = () => { $('hud-z').textContent = map.getZoom().toFixed(1); };
+      map.on('zoom', showZoom);
+      showZoom();
+
+      map.on('load', () => {
+        const firstSymbol = map.getStyle().layers.find(l => l.type === 'symbol')?.id;
+
+        map.addSource('imagery', { type: 'raster', tileSize: 256, maxzoom: 18,
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' });
+        map.addLayer({ id: 'imagery', type: 'raster', source: 'imagery', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.85, 'raster-saturation': -0.3 } }, firstSymbol);
+
+        map.addSource('perimeters', { type: 'geojson', data: fc([]), attribution: 'NIFC WFIGS' });
+        map.addLayer({ id: 'perimeters-fill', type: 'fill', source: 'perimeters', paint: { 'fill-color': '#ff5a1f', 'fill-opacity': 0.18 } });
+        map.addLayer({ id: 'perimeters-line', type: 'line', source: 'perimeters', paint: { 'line-color': '#ff7a3d', 'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.6, 10, 2], 'line-opacity': 0.9 } });
+
+        map.addSource('hotspots', { type: 'geojson', data: fc([]), attribution: 'NASA FIRMS' });
+        // Continental zoom: heat glow in the fire-power ramp; cross-fades to individual detections.
+        map.addLayer({ id: 'hotspots-heat', type: 'heatmap', source: 'hotspots', maxzoom: 9, paint: {
+          'heatmap-weight': ['interpolate', ['linear'], ['get', 'frp'], 0, 0.15, 20, 0.6, 100, 1],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 2, 0.6, 8, 2],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 2, 6, 6, 14, 9, 24],
+          'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 0.15, '#7a1d0b', 0.35, '#c1121f', 0.55, '#ff4d00', 0.75, '#ff8c1a', 0.9, '#ffc93c', 1, '#fff4d6'],
+          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.9, 8, 0.15] } });
+        map.addLayer({ id: 'hotspots-pts', type: 'circle', source: 'hotspots', minzoom: 5, paint: {
+          'circle-color': ['interpolate', ['linear'], ['get', 'frp'], ...FRP_RAMP],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 1.8, 9, 4, 13, 8],
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0, 6.5, 0.95],
+          'circle-blur': 0.2 } });
+
+        map.addSource('incidents', { type: 'geojson', data: fc([]), attribution: 'NIFC WFIGS' });
+        const base = ['interpolate', ['linear'], ['sqrt', ['coalesce', ['get', 'IncidentSize'], 0]], 0, 3.5, 30, 6, 100, 10, 300, 17, 600, 26];
+        const containExpr = ['case', ['!', ['has', 'PercentContained']], '#7d8a96', ['==', ['get', 'PercentContained'], null], '#7d8a96',
+          ['>=', ['get', 'PercentContained'], 100], '#7d8a96', ['>=', ['get', 'PercentContained'], 75], '#ffd166',
+          ['>=', ['get', 'PercentContained'], 25], '#ff8a1f', '#ff3b30'];
+        map.addLayer({ id: 'incidents-glow', type: 'circle', source: 'incidents', paint: {
+          'circle-color': containExpr, 'circle-blur': 1, 'circle-opacity': 0.35,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['*', base, 1.6], 9, ['*', base, 3]] } });
+        map.addLayer({ id: 'incidents', type: 'circle', source: 'incidents', paint: {
+          'circle-color': containExpr, 'circle-opacity': 0.9,
+          'circle-stroke-color': '#0b0806', 'circle-stroke-width': 1,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['*', base, 0.8], 9, ['*', base, 1.6]] } });
+
+        map.addSource('mine', { type: 'geojson', data: fc([]) });
+        map.addLayer({ id: 'mine-ring', type: 'circle', source: 'mine', paint: {
+          'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': '#ffc93c', 'circle-stroke-width': 2.5,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 14, 9, 30] } });
+
+        for (const id of ['incidents', 'hotspots-pts', 'mine-ring']) {
+          map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
+          map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
+        }
+        map.on('click', e => {
+          const hit = map.queryRenderedFeatures(e.point, { layers: ['mine-ring', 'incidents', 'hotspots-pts'].filter(l => map.getLayer(l)) })[0];
+          if (!hit) return;
+          const html = hit.layer.id === 'hotspots-pts' ? hotspotPopup(hit.properties) : incidentPopup(hit.properties);
+          new maplibregl.Popup({ maxWidth: '300px' }).setLngLat(hit.geometry.coordinates.slice(0, 2)).setHTML(html).addTo(map);
+        });
+
+        mapReady = true;
+        applyLayerVisibility();
+        if (perimeters) map.getSource('perimeters').setData(perimeters);
+        render();
+      });
+    }
+
+    const LAYER_IDS = {
+      incidents: ['incidents', 'incidents-glow'], perimeters: ['perimeters-fill', 'perimeters-line'],
+      hotspots: ['hotspots-heat', 'hotspots-pts'], mine: ['mine-ring'], imagery: ['imagery'],
+    };
+    function applyLayerVisibility() {
+      if (!mapReady) return;
+      for (const [key, ids] of Object.entries(LAYER_IDS)) {
+        for (const id of ids) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', state.layers[key] ? 'visible' : 'none');
+      }
+    }
+
+    function flyToIncident(f) {
+      if (!map || !f) return;
+      document.getElementById('map-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const p = f.properties;
+      const zoom = Math.max(7, Math.min(11, 11 - Math.log10((p.IncidentSize || 10)) * 0.9));
+      // Land the incident low in the view so its popup opens upward with room to spare.
+      const lift = Math.min(200, map.getContainer().clientHeight * 0.28);
+      map.flyTo({ center: f.geometry.coordinates, zoom, speed: 1.4, offset: [0, lift] });
+      map.once('moveend', () => new maplibregl.Popup({ maxWidth: '300px' }).setLngLat(f.geometry.coordinates).setHTML(incidentPopup(p)).addTo(map));
+    }
+
+    // ---------- controls ----------
+    function seg(id, key) {
+      $(id).addEventListener('click', e => {
+        const b = e.target.closest('button'); if (!b) return;
+        $(id).querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+        state[key] = b.dataset.v; render();
+      });
+    }
+    seg('type-seg', 'type');
+    seg('conf-seg', 'conf');
+    $('min-acres').addEventListener('input', e => {
+      state.minAcres = ACRE_STEPS[+e.target.value];
+      $('min-acres-v').textContent = state.minAcres ? `${compact(state.minAcres)}+ ac` : 'any';
+      render();
+    });
+    $('min-frp').addEventListener('input', e => {
+      state.minFrp = FRP_STEPS[+e.target.value];
+      $('min-frp-v').textContent = `${state.minFrp}${state.minFrp ? '+' : ''} MW`;
+      render();
+    });
+    $('state-sel').addEventListener('change', e => { state.state = e.target.value; render(); });
+    $('search').addEventListener('input', e => { state.q = e.target.value; render(); });
+    $('hide-contained').addEventListener('change', e => { state.hideContained = e.target.checked; render(); });
+    document.querySelectorAll('[data-layer]').forEach(cb => cb.addEventListener('change', () => {
+      state.layers[cb.dataset.layer] = cb.checked; applyLayerVisibility();
+    }));
+    $('inc-list').addEventListener('click', e => {
+      const li = e.target.closest('li[data-id]'); if (!li) return;
+      flyToIncident(incidents.find(f => f.properties.UniqueFireIdentifier === li.dataset.id));
+    });
+    $('mine-list').addEventListener('click', e => {
+      if (e.target.id === 'clear-mine') {
+        e.preventDefault();
+        storage(s => s.removeItem('fifi_my_incidents'));
+        mine = [];
+        $('mine-list').innerHTML = '<p class="mine-empty">Cleared. <a href="/extract">Extract an ICS-204</a> to add one.</p>';
+        render();
         return;
       }
-      if (!candidate) return;
-      try {
-        const res = await fetch('/api/access', { method: 'POST', headers: { 'X-Access-Code': candidate } });
-        if (res.ok) {
-          accessCode = candidate;
-          serverKey = true;
-          storage(s => s.setItem(ACCESS_STORAGE, candidate));
-          showAccess(true);
-        } else {
-          storage(s => s.removeItem(ACCESS_STORAGE));
-          if (fromLink) showError('That access link is not valid. Ask for a new one, or use your own Gemini key.');
-        }
-      } catch { /* offline: leave as is */ }
-    }
-
-    fetch('/api/config').then(r => r.json()).then(async cfg => {
-      COLUMNS = cfg.columns || [];
-      MAX_UPLOAD = (cfg.max_upload_mb || 4) * 1024 * 1024;
-      await setupAccess(cfg);
-      updateUI();
-    }).catch(() => {});
-
-    // ---- Files ----
-    const isAllowed = name => ALLOWED.some(ext => name.toLowerCase().endsWith(ext));
-
-    function addFiles(files) {
-      for (const file of files) {
-        if (!isAllowed(file.name)) { showError(`${file.name}: unsupported file type.`); continue; }
-        if (items.some(i => i.file.name === file.name && i.file.size === file.size)) continue;
-        items.push({ file, state: 'ready', message: '', rows: [] });
-      }
-      updateUI();
-    }
-
-    $('file-input').addEventListener('change', e => { addFiles(Array.from(e.target.files)); e.target.value = ''; });
-    const dropzone = $('dropzone');
-    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
-    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-    dropzone.addEventListener('drop', e => {
-      e.preventDefault();
-      dropzone.classList.remove('dragover');
-      addFiles(Array.from(e.dataTransfer.files));
+      const item = e.target.closest('[data-mine]'); if (!item) return;
+      const m = mine[+item.dataset.mine];
+      if (m?.match) flyToIncident(m.match);
     });
 
-    window.removeItem = i => { if (!busy) { items.splice(i, 1); updateUI(); renderResults(); } };
+    // ---------- boot ----------
+    loadMine();
+    initMap();
 
-    $('clear-btn').addEventListener('click', () => { items = []; hideAlerts(); updateUI(); renderResults(); });
-
-    // ---- UI ----
-    function hideAlerts() { $('error-alert').classList.add('hidden'); $('success-alert').classList.add('hidden'); }
-    function showError(msg) { $('error-alert').textContent = msg; $('error-alert').classList.remove('hidden'); }
-    function showSuccess(msg) { $('success-alert').textContent = msg; $('success-alert').classList.remove('hidden'); }
-
-    const allRows = () => items.flatMap(i => i.rows);
-
-    function stateLabel(item) {
-      if (item.state === 'working') return '<span class="spinner"></span> Reading…';
-      if (item.state === 'done') return `✓ ${item.rows.length} row(s)`;
-      if (item.state === 'failed') return esc(item.message);
-      return `${(item.file.size / 1024).toFixed(0)} KB`;
-    }
-
-    function updateUI() {
-      const hasKey = !!keyInput.value.trim() || serverKey;
-      const pending = items.some(i => i.state === 'ready' || i.state === 'failed');
-      $('extract-btn').disabled = busy || !hasKey || !pending;
-      $('extract-btn').innerHTML = busy ? '<span class="spinner"></span> Extracting…' : 'Extract data';
-      $('download-btn').disabled = busy || allRows().length === 0;
-      $('clear-btn').disabled = busy || items.length === 0;
-      $('file-list').innerHTML = items.map((item, i) => `
-        <div class="file-item">
-          <span class="file-name">${esc(item.file.name)}</span>
-          <span class="file-state ${item.state}">${stateLabel(item)}</span>
-          <button type="button" onclick="removeItem(${i})" title="Remove" ${busy ? 'disabled' : ''}>×</button>
-        </div>`).join('');
-    }
-
-    function renderResults() {
-      const rows = allRows();
-      if (!rows.length) { $('results-card').classList.add('hidden'); return; }
-      const cols = COLUMNS.length ? COLUMNS : Object.keys(rows[0]);
-      $('preview-head').innerHTML = '<tr>' + cols.map(c => `<th>${esc(c.replace(/_/g, ' '))}</th>`).join('') + '</tr>';
-      $('preview-body').innerHTML = rows.map(row => '<tr>' + cols.map(c => {
-        const val = row[c] ?? '';
-        if (c === 'status' && val) return `<td><span class="status-badge status-${esc(val)}">${esc(val)}</span></td>`;
-        return `<td title="${esc(val)}">${esc(val)}</td>`;
-      }).join('') + '</tr>').join('');
-      const count = s => rows.filter(r => r.status === s).length;
-      $('stats').innerHTML = `
-        <div><div class="stat-value">${items.filter(i => i.state === 'done').length}</div><div class="stat-label">Forms read</div></div>
-        <div><div class="stat-value">${rows.length}</div><div class="stat-label">Rows</div></div>
-        <div><div class="stat-value">${count('CRITICAL') + count('NO_PERSONNEL')}</div><div class="stat-label">Understaffed resources</div></div>`;
-      $('results-card').classList.remove('hidden');
-    }
-
-    // ---- Shrink big photos in the browser so uploads stay small ----
-    async function prepareFile(file) {
-      const isPdf = file.name.toLowerCase().endsWith('.pdf');
-      if (isPdf || file.size <= RESIZE_OVER) return file;
-      try {
-        const bitmap = await createImageBitmap(file);
-        const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(bitmap.width * scale);
-        canvas.height = Math.round(bitmap.height * scale);
-        canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-        const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
-        if (!blob) return file;
-        return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
-      } catch {
-        return file;
-      }
-    }
-
-    async function extractOne(item) {
-      item.state = 'working';
-      updateUI();
-      try {
-        const upload = await prepareFile(item.file);
-        if (upload.size > MAX_UPLOAD) throw new Error(`Too large (${(upload.size / 1048576).toFixed(1)} MB). Max is ${MAX_UPLOAD / 1048576} MB.`);
-        const fd = new FormData();
-        fd.append('file', upload, upload.name);
-        const headers = {};
-        const key = keyInput.value.trim();
-        if (accessCode) headers['X-Access-Code'] = accessCode;
-        else if (key) headers['X-Gemini-Key'] = key;
-        const res = await fetch('/api/extract', { method: 'POST', body: fd, headers });
-        let data = {};
-        try { data = await res.json(); } catch { /* non-JSON error page */ }
-        if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
-        item.rows = (data.rows || []).map(r => ({ ...r, source_file: item.file.name }));
-        item.state = 'done';
-      } catch (err) {
-        item.state = 'failed';
-        item.message = err.message || 'Failed';
-      }
-      updateUI();
-      renderResults();
-    }
-
-    $('extract-btn').addEventListener('click', async () => {
-      hideAlerts();
-      busy = true;
-      updateUI();
-      // One form at a time: friendlier to free-tier Gemini rate limits.
-      for (const item of items.filter(i => i.state === 'ready' || i.state === 'failed')) {
-        await extractOne(item);
-      }
-      busy = false;
-      updateUI();
-      const failed = items.filter(i => i.state === 'failed');
-      if (failed.length) showError(`${failed.length} form(s) failed. See the file list for details, then press Extract data to retry.`);
-      if (allRows().length) showSuccess(`${allRows().length} row(s) ready. Press Download CSV to save.`);
+    const incP = fetchJson(INC_URL).then(d => {
+      incidents = (d.features || []).filter(f => f.geometry && Array.isArray(f.geometry.coordinates));
+      matchMine(); populateStates(); updateReadouts();
+      $('m-per').textContent = '…';
     });
+    const perP = fetchJson(PER_URL, 40000).then(d => {
+      perimeters = d;
+      $('m-per').textContent = num((d.features || []).length);
+      if (mapReady) map.getSource('perimeters').setData(d);
+    }).catch(() => { $('m-per').textContent = 'n/a'; });
+    const hotP = fetchJson('/api/hotspots', 40000).then(d => {
+      hotspots = d.points || [];
+      hotMeta = d;
+      $('r-hot').textContent = compact(hotspots.length);
+    }).catch(() => { $('r-hot').textContent = 'n/a'; $('m-hot').textContent = 'n/a'; });
 
-    // ---- CSV download (built in the browser) ----
-    function toCsv(rows) {
-      const cols = COLUMNS.length ? COLUMNS : Object.keys(rows[0]);
-      const cell = v => {
-        let s = String(v ?? '');
-        if (/^[=+\-@]/.test(s)) s = "'" + s;   // stop spreadsheet formula injection
-        return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-      };
-      return [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\r\n');
-    }
-
-    $('download-btn').addEventListener('click', () => {
-      const rows = allRows();
-      if (!rows.length) return;
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').replace(/(\d{8})/, '$1_');
-      const blob = new Blob(['﻿' + toCsv(rows)], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = Object.assign(document.createElement('a'), { href: url, download: `ics204_extracted_${stamp}.csv` });
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+    Promise.allSettled([incP, perP, hotP]).then(results => {
+      const failed = results[0].status === 'rejected';
+      $('map-msg').textContent = failed ? 'The national incident feed did not respond. Refresh to try again.' : '';
+      if (!failed) $('map-msg').style.display = 'none';
+      const sats = hotMeta?.sources?.filter(s => s.ok).map(s => s.name).join(' + ');
+      const when = hotMeta?.fetched ? new Date(hotMeta.fetched * 1000).toISOString().slice(5, 16).replace('T', ' ') + ' UTC' : null;
+      $('r-updated').textContent = failed ? 'incident feed unavailable' : `feeds loaded ${new Date().toISOString().slice(11, 16)} UTC`;
+      $('source-line').innerHTML = `Sources: NIFC WFIGS current incidents &amp; perimeters · ` +
+        (hotMeta ? `NASA FIRMS · VIIRS ${esc(sats || '')} · 24 h to ${esc(when)}${hotMeta.stale ? ' <span class="stale">· STALE</span>' : ''}` : 'NASA FIRMS unavailable');
+      render();
     });
-
-    updateUI();
+  })();
   </script>
 </body>
 </html>

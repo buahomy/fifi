@@ -1,10 +1,36 @@
-# Ignis OS — ICS-204 Form Extractor
+# 🔥 fifi — Fire Incident Form Intelligence
 
-A web app that turns **ICS-204 Assignment List forms** into a clean, sortable **CSV**.
+**Live:** https://fifi-tan.vercel.app
+
+A web app that turns **ICS-204 Assignment List forms** into a clean, sortable **CSV**, and places those incidents on a **live map of US wildfires**.
 
 Upload photos, scans or PDFs of ICS-204 forms (typed or handwritten). Google Gemini reads every field (incident info, supervisors, resources, tasks, comms and approvals), and the site shows the results in a table you can download as one combined CSV.
 
-**Built with:** Python · Flask · Google Gemini API (structured JSON output) · vanilla JavaScript · Vercel
+**Built with:** Python · Flask · Google Gemini API (structured JSON output) · MapLibre GL JS · vanilla JavaScript · Vercel
+
+## Live fire map
+
+The landing page (`/`) shows a live operating picture, built entirely from public, keyless feeds:
+
+| Layer | Source | Notes |
+|---|---|---|
+| Incidents | NIFC WFIGS current incident locations | Sized by acres, colored by containment. Popups show personnel, complexity, cause, behavior and estimated cost. |
+| Perimeters | NIFC WFIGS current interagency perimeters | Simplified to ~100 m for a light payload |
+| Satellite hotspots | NASA FIRMS VIIRS, NOAA-20 + NOAA-21, trailing 24 h | Colored by fire radiative power. Heatmap at continental zoom, points up close. Relayed by `/api/hotspots`. |
+| Your ICS-204s | Your own extractions, kept in your browser | Matched to the national feed by incident name; gold ring plus your form totals in the popup |
+| Imagery | Esri World Imagery | Optional basemap |
+
+Filters: wildfire / prescribed, minimum acres, state, name search, hide contained, minimum fire power (MW) and detection confidence. One filter pass drives the map, the list and every counter.
+
+The fire-power color ramp, the intensity and confidence filters, and the heatmap-to-points crossfade are adapted from the MIT-licensed [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view).
+
+## Security & privacy
+
+- **No storage:** there is no database and no file storage. Uploaded forms are held **in memory only** for the request (`InMemoryRequest` in `app.py` stops Werkzeug spooling large uploads to disk), then discarded.
+- **Visitor keys:** sent per request in `X-Gemini-Key`, used for that one Gemini call, never logged or saved. Kept in the visitor's browser only if they tick "Remember on this device".
+- **Private access:** the owner's key is a host environment variable and never reaches the browser; only the access code does.
+- **Results stay client-side:** the CSV is built in the browser, and the map summary lives in the browser's `localStorage` until cleared.
+- **Google:** Gemini necessarily receives each form. On free-tier keys Google may use content to improve its products; paid keys are not used for training. Use a paid key for confidential IAPs.
 
 ---
 
@@ -32,7 +58,7 @@ pip install -r requirements.txt
 python3 app.py
 ```
 
-Open **http://localhost:8080** and paste your Gemini key into the page.
+Open **http://localhost:8080** for the landing page and live map, or **http://localhost:8080/extract** to paste your Gemini key and extract forms.
 
 Settings go in environment variables, or in a git-ignored `.env` file locally:
 
@@ -61,7 +87,7 @@ Usage through the link is billed to your Gemini key, so share it only with peopl
 
 ## Deploy
 
-The repo is ready for **[Vercel](https://vercel.com)**: import it at vercel.com/new, add the two environment variables above if you want private access, and deploy. Vercel detects the Flask app in `app.py` and serves `public/index.html` as the home page. A form usually takes 10–20 seconds. Each Gemini call is capped at 240 seconds, so a slow response returns a clear "try again" message before Vercel's 300-second limit.
+The repo is ready for **[Vercel](https://vercel.com)**: import it at vercel.com/new, add the two environment variables above if you want private access, and deploy. Vercel detects the Flask app in `app.py` and serves the landing page at `/` and the extractor at `/extract`. A form usually takes 10–20 seconds. Each Gemini call is capped at 240 seconds, so a slow response returns a clear "try again" message before Vercel's 300-second limit.
 
 It also runs on any host that supports Python (Render, Railway, Fly.io, Cloud Run) with `gunicorn app:app`.
 
@@ -104,19 +130,23 @@ Instead of `X-Gemini-Key`, a request can send `X-Access-Code` to use the owner's
 
 `GET /api/config` returns the CSV column order, the upload size limit, and whether the server key needs an access code. `POST /api/access` (with `X-Access-Code`) returns 200 if the code is valid and 401 if not.
 
+`GET /api/hotspots` returns NASA FIRMS VIIRS detections (NOAA-20 + NOAA-21, trailing 24 h, US + Hawaii) as compact arrays: `[lon, lat, frp_mw, confidence, acquired_utc, daynight, satellite]`. Cached for 15 minutes.
+
 ---
 
 ## Project structure
 
 ```
-app.py               Flask server: serves the page and the /api endpoints
+app.py               Flask server: pages, /api endpoints, FIRMS relay, in-memory uploads
 ics204_extractor.py  Gemini prompt + JSON schema, and flattening to CSV rows
-public/index.html    The whole front end (upload, key handling, preview, CSV export)
+public/index.html    Landing page + live fire map (MapLibre)
+public/extract.html  Extractor (upload, key / access link, preview, CSV export)
 requirements.txt     flask, google-genai
 ```
 
 ## Notes
 
 - **Accuracy:** Gemini reads handwriting well, but smudged or crossed-out entries can be misread. Review the CSV before using it for operational decisions.
-- **Privacy:** forms are sent to Google's Gemini API and are not saved by this app. Don't upload forms with sensitive personal information unless your Gemini terms allow it.
+- **Privacy:** see [Security & privacy](#security--privacy).
+- **Not for emergency use:** map feeds can be delayed or incomplete. Confirm with official sources and InciWeb.
 - **Limits:** uploads are capped at 4 MB per form after resizing. Free Gemini keys have per-minute rate limits; if you hit one, wait a minute and press Extract again, and only the failed forms are retried.
