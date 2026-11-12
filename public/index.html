@@ -169,7 +169,7 @@
         Turn photos or scans of ICS-204 Assignment List forms, including handwritten ones, into an organized CSV you can sort and filter in Excel or Google Sheets.
       </p>
       <div class="steps">
-        <span><b>1.</b> Paste your Gemini key</span>
+        <span><b>1.</b> Paste your Gemini key (or open your access link)</span>
         <span><b>2.</b> Add forms</span>
         <span><b>3.</b> Extract and download CSV</span>
       </div>
@@ -179,6 +179,12 @@
   <main class="container">
     <div id="error-alert" class="alert alert-error hidden"></div>
     <div id="success-alert" class="alert alert-success hidden"></div>
+
+    <div class="card hidden" id="access-card">
+      <div class="card-title">1 · Access</div>
+      <p class="key-status ok">✓ You're using a private access link, so no API key is needed. Go straight to uploading forms.</p>
+      <p class="key-help"><a href="#" id="forget-access">Stop using the access link on this device</a></p>
+    </div>
 
     <div class="card" id="key-card">
       <div class="card-title">1 · Your Gemini API key</div>
@@ -271,17 +277,62 @@
       $('toggle-key').textContent = show ? 'Hide' : 'Show';
     });
 
-    let serverKey = false;
-    fetch('/api/config').then(r => r.json()).then(cfg => {
-      COLUMNS = cfg.columns || [];
-      MAX_UPLOAD = (cfg.max_upload_mb || 4) * 1024 * 1024;
-      serverKey = !!cfg.server_key;
-      if (serverKey) {
+    // ---- Private access link (?access=CODE): uses the site owner's key ----
+    const ACCESS_STORAGE = 'ics204_access_code';
+    let accessCode = '';
+    let serverKey = false;   // true when the server key can be used without a key of your own
+
+    function showAccess(on) {
+      $('access-card').classList.toggle('hidden', !on);
+      $('key-card').classList.toggle('hidden', on);
+    }
+
+    $('forget-access').addEventListener('click', e => {
+      e.preventDefault();
+      accessCode = '';
+      serverKey = false;
+      storage(s => s.removeItem(ACCESS_STORAGE));
+      showAccess(false);
+      updateUI();
+    });
+
+    async function setupAccess(cfg) {
+      const params = new URLSearchParams(location.search);
+      const fromLink = params.get('access');
+      if (fromLink) {
+        // Remove the code from the address bar so it isn't left in history or screenshots.
+        params.delete('access');
+        history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '') + location.hash);
+      }
+      const candidate = (fromLink || storage(s => s.getItem(ACCESS_STORAGE)) || '').trim();
+      if (!cfg.server_key) return;
+      if (!cfg.access_code_required) {        // local setup with an open server key
+        serverKey = true;
         const note = $('server-key-note');
-        note.textContent = 'This site has a shared key set up, so a key of your own is optional.';
+        note.textContent = 'This server has a key set up, so a key of your own is optional.';
         note.classList.add('ok');
         note.classList.remove('hidden');
+        return;
       }
+      if (!candidate) return;
+      try {
+        const res = await fetch('/api/access', { method: 'POST', headers: { 'X-Access-Code': candidate } });
+        if (res.ok) {
+          accessCode = candidate;
+          serverKey = true;
+          storage(s => s.setItem(ACCESS_STORAGE, candidate));
+          showAccess(true);
+        } else {
+          storage(s => s.removeItem(ACCESS_STORAGE));
+          if (fromLink) showError('That access link is not valid. Ask for a new one, or use your own Gemini key.');
+        }
+      } catch { /* offline: leave as is */ }
+    }
+
+    fetch('/api/config').then(r => r.json()).then(async cfg => {
+      COLUMNS = cfg.columns || [];
+      MAX_UPLOAD = (cfg.max_upload_mb || 4) * 1024 * 1024;
+      await setupAccess(cfg);
       updateUI();
     }).catch(() => {});
 
@@ -387,7 +438,8 @@
         fd.append('file', upload, upload.name);
         const headers = {};
         const key = keyInput.value.trim();
-        if (key) headers['X-Gemini-Key'] = key;
+        if (accessCode) headers['X-Access-Code'] = accessCode;
+        else if (key) headers['X-Gemini-Key'] = key;
         const res = await fetch('/api/extract', { method: 'POST', body: fd, headers });
         let data = {};
         try { data = await res.json(); } catch { /* non-JSON error page */ }
