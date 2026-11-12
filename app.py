@@ -17,6 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from google import genai
 from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 
 from ics204_extractor import COLUMNS, extract_form, flatten
 
@@ -28,6 +29,7 @@ MIME_TYPES = {
     ".webp": "image/webp", ".pdf": "application/pdf",
 }
 MAX_UPLOAD_MB = 4  # stays under serverless request limits; the page shrinks photos first
+GEMINI_TIMEOUT_MS = 240_000  # give up before the host's 300 s limit so we can return a clear error
 
 
 def load_env_file():
@@ -108,8 +110,9 @@ def extract():
     if not mime_type:
         return jsonify({"error": "Unsupported file type. Use PNG, JPG, WEBP or PDF."}), 400
 
+    client = genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(timeout=GEMINI_TIMEOUT_MS))
     try:
-        data = extract_form(genai.Client(api_key=api_key), upload.read(), mime_type)
+        data = extract_form(client, upload.read(), mime_type)
     except genai_errors.ClientError as e:
         if e.code == 429:
             return jsonify({"error": "Gemini rate limit reached. Wait a minute and try again."}), 429
@@ -120,6 +123,10 @@ def extract():
         return jsonify({"error": f"Gemini is unavailable right now ({e.code}). Try again shortly."}), 502
     except ValueError:
         return jsonify({"error": "Gemini returned data that couldn't be read. Try again."}), 502
+    except Exception as e:  # network errors and timeouts from the HTTP client
+        if "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower():
+            return jsonify({"error": "Gemini took too long on this form. Press Extract data to try again."}), 504
+        return jsonify({"error": "Couldn't reach Gemini. Try again shortly."}), 502
 
     return jsonify({"rows": flatten(data, upload.filename)})
 

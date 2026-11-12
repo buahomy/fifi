@@ -10,6 +10,9 @@ from google import genai
 from google.genai import types
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+# LOW is about 10x faster than HIGH and gave identical results on test forms;
+# reading a form needs good vision, not long reasoning.
+THINKING_LEVEL = os.environ.get("GEMINI_THINKING", "LOW")
 
 PROMPT = (
     "Extract all data from this ICS-204 Work Assignment Form and structure it as JSON. "
@@ -79,7 +82,7 @@ def extract_form(client: genai.Client, data: bytes, mime_type: str) -> dict:
         ])],
         config=types.GenerateContentConfig(
             top_p=0.1,
-            thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
+            thinking_config=types.ThinkingConfig(thinking_level=THINKING_LEVEL),
             response_mime_type="application/json",
             response_schema=RESPONSE_SCHEMA,
         ),

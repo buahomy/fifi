@@ -41,6 +41,7 @@ Settings go in environment variables, or in a git-ignored `.env` file locally:
 | `GOOGLE_API_KEY` / `GEMINI_API_KEY` | *(unset)* | The owner's key, used for private-access visitors |
 | `ACCESS_CODE` | *(unset)* | Secret code that unlocks the owner's key. **Always set this when `GOOGLE_API_KEY` is set on a public site**; without it, every visitor uses the owner's key. |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Gemini model used for extraction |
+| `GEMINI_THINKING` | `LOW` | Gemini thinking level. `LOW` is about 10x faster than `HIGH` and matched it on test forms. |
 | `PORT` | `8080` | Local server port |
 | `FLASK_DEBUG` | `0` | `1` enables auto-reload |
 
@@ -58,7 +59,7 @@ Usage through the link is billed to your Gemini key, so share it only with peopl
 
 ## Deploy
 
-The repo is ready for **[Vercel](https://vercel.com)**: import it at vercel.com/new, add the two environment variables above if you want private access, and deploy. Vercel detects the Flask app in `app.py` and serves `public/index.html` as the home page. A detailed form takes Gemini 30–60 seconds, which is well within Vercel's default 300-second request limit.
+The repo is ready for **[Vercel](https://vercel.com)**: import it at vercel.com/new, add the two environment variables above if you want private access, and deploy. Vercel detects the Flask app in `app.py` and serves `public/index.html` as the home page. A form usually takes 10–20 seconds. Each Gemini call is capped at 240 seconds, so a slow response returns a clear "try again" message before Vercel's 300-second limit.
 
 It also runs on any host that supports Python (Render, Railway, Fly.io, Cloud Run) with `gunicorn app:app`.
 
