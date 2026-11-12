@@ -141,6 +141,7 @@ app.py               Flask server: pages, /api endpoints, FIRMS relay, in-memory
 ics204_extractor.py  Gemini prompt + JSON schema, and flattening to CSV rows
 public/index.html    Landing page + live fire map (MapLibre)
 public/extract.html  Extractor (upload, key / access link, preview, CSV export)
+vercel.json          Maps /extract to the CDN copy of extract.html on Vercel
 requirements.txt     flask, google-genai
 ```
 
