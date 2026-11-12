@@ -19,7 +19,8 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 
-from ics204_extractor import COLUMNS, extract_form, flatten
+from ics204_extractor import (API_VERSION, COLUMNS, OWNER_MODEL, OWNER_THINKING,
+                              PUBLIC_MODEL, PUBLIC_THINKING, extract_form, flatten)
 
 ROOT = Path(__file__).parent
 PUBLIC = ROOT / "public"
@@ -63,15 +64,18 @@ def code_matches(supplied: str) -> bool:
 
 
 def resolve_key():
-    """Return (api_key, error_message). Visitor's own key wins; otherwise the server key if allowed."""
+    """Return (api_key, uses_owner_key, error_message).
+
+    The visitor's own key wins; otherwise the owner's server key, if the access code allows it.
+    """
     own = request.headers.get("X-Gemini-Key", "").strip()
     if own:
-        return own, None
+        return own, False, None
     if not server_key():
-        return None, "Add your Gemini API key first."
+        return None, False, "Add your Gemini API key first."
     if access_code() and not code_matches(request.headers.get("X-Access-Code", "").strip()):
-        return None, "Add your Gemini API key, or open your private access link again."
-    return server_key(), None
+        return None, False, "Add your Gemini API key, or open your private access link again."
+    return server_key(), True, None
 
 
 @app.get("/")
@@ -98,9 +102,10 @@ def check_access():
 
 @app.post("/api/extract")
 def extract():
-    api_key, problem = resolve_key()
+    api_key, owner, problem = resolve_key()
     if problem:
         return jsonify({"error": problem}), 401
+    model, thinking = (OWNER_MODEL, OWNER_THINKING) if owner else (PUBLIC_MODEL, PUBLIC_THINKING)
 
     upload = request.files.get("file")
     if not upload or not upload.filename:
@@ -110,9 +115,10 @@ def extract():
     if not mime_type:
         return jsonify({"error": "Unsupported file type. Use PNG, JPG, WEBP or PDF."}), 400
 
-    client = genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(timeout=GEMINI_TIMEOUT_MS))
+    client = genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(
+        api_version=API_VERSION, timeout=GEMINI_TIMEOUT_MS))
     try:
-        data = extract_form(client, upload.read(), mime_type)
+        data = extract_form(client, upload.read(), mime_type, model, thinking)
     except genai_errors.ClientError as e:
         if e.code == 429:
             return jsonify({"error": "Gemini rate limit reached. Wait a minute and try again."}), 429
@@ -128,7 +134,7 @@ def extract():
             return jsonify({"error": "Gemini took too long on this form. Press Extract data to try again."}), 504
         return jsonify({"error": "Couldn't reach Gemini. Try again shortly."}), 502
 
-    return jsonify({"rows": flatten(data, upload.filename)})
+    return jsonify({"rows": flatten(data, upload.filename), "model": model})
 
 
 @app.errorhandler(413)

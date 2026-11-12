@@ -40,8 +40,10 @@ Settings go in environment variables, or in a git-ignored `.env` file locally:
 |---|---|---|
 | `GOOGLE_API_KEY` / `GEMINI_API_KEY` | *(unset)* | The owner's key, used for private-access visitors |
 | `ACCESS_CODE` | *(unset)* | Secret code that unlocks the owner's key. **Always set this when `GOOGLE_API_KEY` is set on a public site**; without it, every visitor uses the owner's key. |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | Gemini model used for extraction |
-| `GEMINI_THINKING` | `LOW` | Gemini thinking level. `LOW` is about 10x faster than `HIGH` and matched it on test forms. |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Model for visitors using their own key (free-tier friendly) |
+| `GEMINI_THINKING` | `LOW` | Thinking level for that model. On Flash, `LOW` is about 10x faster than `HIGH` and matched it on test forms. |
+| `OWNER_GEMINI_MODEL` | `gemini-3.1-pro-preview` | Model for private-access visitors using the owner's key |
+| `OWNER_GEMINI_THINKING` | `HIGH` | Thinking level for the owner's model (about 15 s per form on Pro) |
 | `PORT` | `8080` | Local server port |
 | `FLASK_DEBUG` | `0` | `1` enables auto-reload |
 

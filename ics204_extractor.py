@@ -9,10 +9,17 @@ import os
 from google import genai
 from google.genai import types
 
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
-# LOW is about 10x faster than HIGH and gave identical results on test forms;
-# reading a form needs good vision, not long reasoning.
-THINKING_LEVEL = os.environ.get("GEMINI_THINKING", "LOW")
+# Visitors using their own (often free-tier) key: fast, free-tier-friendly Flash.
+# LOW thinking is about 10x faster than HIGH on Flash and gave identical results on test forms.
+PUBLIC_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+PUBLIC_THINKING = os.environ.get("GEMINI_THINKING", "LOW")
+
+# Private-access visitors using the owner's key: the owner's original Pro setup.
+OWNER_MODEL = os.environ.get("OWNER_GEMINI_MODEL", "gemini-3.1-pro-preview")
+OWNER_THINKING = os.environ.get("OWNER_GEMINI_THINKING", "HIGH")
+
+# Preview models (like gemini-3.1-pro-preview) are only served on v1beta.
+API_VERSION = "v1beta"
 
 PROMPT = (
     "Extract all data from this ICS-204 Work Assignment Form and structure it as JSON. "
@@ -72,17 +79,17 @@ RESPONSE_SCHEMA = types.Schema(
 )
 
 
-def extract_form(client: genai.Client, data: bytes, mime_type: str) -> dict:
+def extract_form(client: genai.Client, data: bytes, mime_type: str, model: str, thinking: str) -> dict:
     """Send one form to Gemini and return the parsed JSON. Raises on API errors."""
     response = client.models.generate_content(
-        model=MODEL,
+        model=model,
         contents=[types.Content(role="user", parts=[
             types.Part.from_text(text=PROMPT),
             types.Part.from_bytes(data=data, mime_type=mime_type),
         ])],
         config=types.GenerateContentConfig(
             top_p=0.1,
-            thinking_config=types.ThinkingConfig(thinking_level=THINKING_LEVEL),
+            thinking_config=types.ThinkingConfig(thinking_level=thinking),
             response_mime_type="application/json",
             response_schema=RESPONSE_SCHEMA,
         ),
