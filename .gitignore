@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+output/
+input_forms/
+.venv/
+ics204_processor.log
+.DS_Store
+.cursor/

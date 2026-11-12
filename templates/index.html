@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ignis OS — ICS-204 Form Extractor</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface-2: #243044;
+      --border: #2d3f56;
+      --text: #e8edf4;
+      --muted: #8b9cb3;
+      --accent: #e85d04;
+      --accent-hover: #f48c06;
+      --success: #2dc653;
+      --error: #ef476f;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #1a2332 0%, #0f1419 60%);
+      border-bottom: 1px solid var(--border);
+      padding: 2.5rem 1.5rem 2rem;
+    }
+
+    .hero-inner { max-width: 900px; margin: 0 auto; }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--accent), #dc2f02);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+    }
+
+    h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
+
+    .subtitle { color: var(--muted); font-size: 1rem; max-width: 560px; }
+
+    .container { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .card-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    .formats {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+
+    .format-badge {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .dropzone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      position: relative;
+    }
+
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--accent);
+      background: rgba(232, 93, 4, 0.06);
+    }
+
+    .dropzone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+    .dropzone-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+    .dropzone p { color: var(--muted); font-size: 0.9rem; }
+    .dropzone strong { color: var(--accent); }
+
+    .file-list { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+
+    .file-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface-2);
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+    }
+
+    .file-item button {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1.1rem;
+    }
+
+    .file-item button:hover { color: var(--error); }
+
+    .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.25rem; }
+
+    .btn {
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+
+    .alert {
+      padding: 0.875rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+    }
+
+    .alert-warning { background: rgba(244,140,6,0.15); border: 1px solid rgba(244,140,6,0.4); color: #fbbf24; }
+    .alert-error { background: rgba(239,71,111,0.12); border: 1px solid rgba(239,71,111,0.35); color: #fca5a5; }
+    .alert-success { background: rgba(45,198,83,0.12); border: 1px solid rgba(45,198,83,0.35); color: #86efac; }
+
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .preview-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap; }
+    th { background: var(--surface-2); padding: 0.6rem 0.75rem; text-align: left; font-weight: 600; color: var(--muted); }
+    td { padding: 0.55rem 0.75rem; border-top: 1px solid var(--border); max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+
+    .status-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .status-OK { background: rgba(45,198,83,0.2); color: #86efac; }
+    .status-CRITICAL { background: rgba(239,71,111,0.2); color: #fca5a5; }
+    .status-COMMUNICATION { background: rgba(59,130,246,0.2); color: #93c5fd; }
+
+    .hidden { display: none !important; }
+
+    .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+    .stat-label { font-size: 0.8rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="logo">
+        <div class="logo-icon">🔥</div>
+        <h1>ICS-204 Form Extractor</h1>
+      </div>
+      <p class="subtitle">
+        Upload ICS-204 Work Assignment Forms and extract structured data with Gemini Pro.
+        Download results as CSV.
+      </p>
+    </div>
+  </header>
+
+  <main class="container">
+    {% if not api_configured %}
+    <div class="alert alert-warning">
+      API key not configured. Add <code>GOOGLE_API_KEY</code> to the <code>.env</code> file and restart the server.
+    </div>
+    {% endif %}
+
+    <div id="error-alert" class="alert alert-error hidden"></div>
+    <div id="success-alert" class="alert alert-success hidden"></div>
+
+    <div class="card">
+      <div class="card-title">Upload ICS-204 Forms</div>
+      <div class="formats">
+        <span class="format-badge">PNG</span>
+        <span class="format-badge">JPG</span>
+        <span class="format-badge">PDF</span>
+      </div>
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf" multiple>
+        <div class="dropzone-icon">📋</div>
+        <p><strong>Click to browse</strong> or drag &amp; drop ICS-204 forms here</p>
+        <p>Accepted formats: PNG, JPG, PDF — up to 32 MB each</p>
+      </div>
+      <div class="file-list" id="file-list"></div>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="extract-btn" disabled>
+          Extract &amp; Download CSV
+        </button>
+        <button type="button" class="btn btn-secondary" id="preview-btn" disabled>
+          Preview Results
+        </button>
+        <button type="button" class="btn btn-secondary" id="clear-btn" disabled>
+          Clear
+        </button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="results-card">
+      <div class="card-title">Extracted Data Preview</div>
+      <div class="stats" id="stats"></div>
+      <div class="preview-wrap">
+        <table>
+          <thead id="preview-head"></thead>
+          <tbody id="preview-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const ALLOWED = ['.png', '.jpg', '.jpeg', '.pdf'];
+    let selectedFiles = [];
+
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
+    const fileList = document.getElementById('file-list');
+    const extractBtn = document.getElementById('extract-btn');
+    const previewBtn = document.getElementById('preview-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const errorAlert = document.getElementById('error-alert');
+    const successAlert = document.getElementById('success-alert');
+    const resultsCard = document.getElementById('results-card');
+
+    function isAllowed(name) {
+      const lower = name.toLowerCase();
+      return ALLOWED.some(ext => lower.endsWith(ext));
+    }
+
+    function updateUI() {
+      const hasFiles = selectedFiles.length > 0;
+      extractBtn.disabled = !hasFiles;
+      previewBtn.disabled = !hasFiles;
+      clearBtn.disabled = !hasFiles;
+      fileList.innerHTML = selectedFiles.map((f, i) => `
+        <div class="file-item">
+          <span>${f.name} (${(f.size / 1024).toFixed(1)} KB)</span>
+          <button type="button" onclick="removeFile(${i})" title="Remove">×</button>
+        </div>
+      `).join('');
+    }
+
+    window.removeFile = (index) => { selectedFiles.splice(index, 1); updateUI(); };
+
+    function addFiles(files) {
+      for (const f of files) {
+        if (isAllowed(f.name) && !selectedFiles.some(s => s.name === f.name && s.size === f.size)) {
+          selectedFiles.push(f);
+        }
+      }
+      updateUI();
+    }
+
+    fileInput.addEventListener('change', e => addFiles(Array.from(e.target.files)));
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      addFiles(Array.from(e.dataTransfer.files));
+    });
+
+    clearBtn.addEventListener('click', () => {
+      selectedFiles = [];
+      fileInput.value = '';
+      resultsCard.classList.add('hidden');
+      hideAlerts();
+      updateUI();
+    });
+
+    function hideAlerts() {
+      errorAlert.classList.add('hidden');
+      successAlert.classList.add('hidden');
+    }
+
+    function showError(msg) {
+      errorAlert.textContent = msg;
+      errorAlert.classList.remove('hidden');
+      successAlert.classList.add('hidden');
+    }
+
+    function showSuccess(msg) {
+      successAlert.textContent = msg;
+      successAlert.classList.remove('hidden');
+      errorAlert.classList.add('hidden');
+    }
+
+    function buildFormData() {
+      const fd = new FormData();
+      selectedFiles.forEach(f => fd.append('files', f));
+      return fd;
+    }
+
+    function setLoading(loading) {
+      extractBtn.disabled = loading || !selectedFiles.length;
+      previewBtn.disabled = loading || !selectedFiles.length;
+      extractBtn.innerHTML = loading
+        ? '<span class="spinner"></span> Processing…'
+        : 'Extract &amp; Download CSV';
+    }
+
+    function renderPreview(records) {
+      if (!records.length) return;
+      const keys = Object.keys(records[0]);
+      document.getElementById('preview-head').innerHTML =
+        '<tr>' + keys.map(k => `<th>${k.replace(/_/g, ' ')}</th>`).join('') + '</tr>';
+      document.getElementById('preview-body').innerHTML = records.map(row =>
+        '<tr>' + keys.map(k => {
+          let val = row[k] ?? '';
+          if (k === 'status' && val) return `<td><span class="status-badge status-${val}">${val}</span></td>`;
+          if (typeof val === 'string' && val.length > 80) val = val.slice(0, 80) + '…';
+          return `<td>${val}</td>`;
+        }).join('') + '</tr>'
+      ).join('');
+      document.getElementById('stats').innerHTML = `
+        <div><div class="stat-value">${records.length}</div><div class="stat-label">Records</div></div>
+        <div><div class="stat-value">${selectedFiles.length}</div><div class="stat-label">Forms</div></div>
+      `;
+      resultsCard.classList.remove('hidden');
+    }
+
+    previewBtn.addEventListener('click', async () => {
+      hideAlerts();
+      setLoading(true);
+      try {
+        const res = await fetch('/api/preview', { method: 'POST', body: buildFormData() });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Preview failed');
+        if (data.errors?.length) showError(`Partial errors: ${data.errors.map(e => e.file + ': ' + e.error).join('; ')}`);
+        renderPreview(data.records);
+        showSuccess(`Preview ready — ${data.record_count} record(s) from ${data.files_processed} form(s).`);
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    extractBtn.addEventListener('click', async () => {
+      hideAlerts();
+      setLoading(true);
+      try {
+        const res = await fetch('/api/extract', { method: 'POST', body: buildFormData() });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || 'Extraction failed');
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename=(.+)/);
+        const filename = match ? match[1].replace(/"/g, '') : 'ics204_extracted.csv';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        showSuccess(`CSV downloaded: ${filename}`);
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    });
+  </script>
+</body>
+</html>
