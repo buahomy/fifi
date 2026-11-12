@@ -24,6 +24,29 @@ Filters: wildfire / prescribed, minimum acres, state, name search, hide containe
 
 The fire-power color ramp, the intensity and confidence filters, and the heatmap-to-points crossfade are adapted from the MIT-licensed [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view).
 
+## Behind the scenes: APIs and data sources
+
+| Source | What it is, simply | What fifi uses it for | Key? |
+|---|---|---|---|
+| **Google Gemini API** | Google's AI. fifi sends a form photo plus a template of the fields to fill. | Reads each ICS-204 into structured fields (Flash for the public, Pro for access-link users) | Yes: the visitor's, or the owner's via access link |
+| **NIFC WFIGS** | The National Interagency Fire Center's public wildfire map data (ArcGIS REST API, GeoJSON) | **Incidents**: one dot per current fire with acres, % contained, personnel, cause, cost. **Perimeters**: each fire's outline, smoothed to about 100 m so it loads fast. | No |
+| **NASA FIRMS (VIIRS)** | Heat spots seen by the VIIRS sensor on the NOAA-20 and NOAA-21 weather satellites, last 24 hours | **Hotspots**, colored by fire radiative power (MW, how hot). A glow when zoomed out, dots up close. | No |
+| **MapLibre GL JS** | Free, open-source map library | Draws the interactive map in the browser | No |
+| **CARTO / OpenStreetMap** | Dark background map with roads, borders and place names | The map's base layer | No |
+| **Esri World Imagery** | Satellite photos | Optional photo background | No |
+| **Vercel** | Hosting | Runs the Python server, serves pages from its CDN, stores the owner's key and access code securely | — |
+
+**fifi's own API**
+
+| Endpoint | What it does |
+|---|---|
+| `POST /api/extract` | Takes one form, has Gemini read it, returns rows plus usage (tokens, time, cost) |
+| `POST /api/access` | Checks a private access code |
+| `GET /api/config` | CSV column order, upload limit, models and prices in use |
+| `GET /api/hotspots` | Relays NASA's satellite file. Browsers can't load it directly, so the server fetches it, slims it down and caches it for 15 minutes. |
+
+In one line: **Gemini reads the forms, NIFC supplies fire locations and outlines, NASA satellites supply heat detections (relayed by fifi's server), MapLibre draws it all, and Vercel hosts it.**
+
 ## Security & privacy
 
 - **No storage:** there is no database and no file storage. Uploaded forms are held **in memory only** for the request (`InMemoryRequest` in `app.py` stops Werkzeug spooling large uploads to disk), then discarded.
