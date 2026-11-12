@@ -97,7 +97,7 @@ On a wildfire, each operational period produces an **Incident Action Plan (IAP)*
 
 | Quality | Target | Measured / how |
 |---|---|---|
-| **Speed** | Average under 15 s per page | Measured on 4 real forms: Flash averages 8.9 s, Pro 12.2 s; the densest page took about 17 s. |
+| **Speed** | Average under 15 s per page | **Met on the public site:** Flash averages 8.9 s. **Not met for access-link users:** Pro HIGH averages 25.6 s, a deliberate trade for reliable review flags (see pain point 15). |
 | **Cost efficiency** | Pay only for ICS-204 pages | In a whole-IAP PDF, other forms are detected in the browser for free and never sent (test: 8-page IAP → 3 Gemini calls) |
 | **Trustworthy output** | Never guess silently | Hard handwriting is flagged for human review instead of being quietly filled in |
 | **Cost transparency** | Users see what AI they use and what it costs | Every result shows model, tokens, time and estimated cost (see [Transparency](#transparency-models-api-calls-and-cost)) |
@@ -285,12 +285,12 @@ Measured on four real ICS-204 photos (5–23 rows each). Prices are Google's pai
 
 | | Public site (visitor's own key) | Private access link (owner's key) |
 |---|---|---|
-| Model | `gemini-3.8-flash`, LOW thinking | `gemini-3.1-pro-preview`, LOW thinking |
+| Model | `gemini-3.8-flash`, LOW thinking | `gemini-3.1-pro-preview`, HIGH thinking |
 | Gemini calls | **1 per ICS-204 page** (other pages: 0) | **1 per ICS-204 page** (other pages: 0) |
-| Average time per page | 8.9 s (range 6.7–11.2 s) | 12.2 s (range 7.4–16.6 s) |
-| Tokens per page | 1,339 in (same for every photo) · 503–1,706 out | 1,339 in · 775–2,666 out |
+| Average time per page | 8.9 s (range 6.7–11.2 s) | 25.6 s (range 15.3–34.9 s) |
+| Tokens per page | 1,339 in (same for every photo) · 503–1,706 out | 1,339 in · 1,900–6,621 out (includes thinking) |
 | Price per 1M tokens | $0.75 in · $3.75 out (doubles on 1 Jan 2027) | $2.00 in · $12.00 out |
-| Cost per page | **≈ $0.005** (0.3–0.7¢), about 190 pages per $1 | **≈ $0.024** (1.2–3.5¢), about 40 pages per $1 |
+| Cost per page | **≈ $0.005** (0.3–0.7¢), about 190 pages per $1 | **≈ $0.055** (2.5–8.2¢), about 18 pages per $1 |
 | Free tier | **Yes ($0)**, but Google may use free-tier content to improve its products | **No**: always billed to the key owner |
 
 **What calls happen when:**
@@ -345,7 +345,7 @@ Settings go in environment variables, or in a git-ignored `.env` file locally:
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Model for visitors using their own key (free-tier friendly) |
 | `GEMINI_THINKING` | `LOW` | Thinking level for that model. On Flash, `LOW` is about 10x faster than `HIGH` and matched it on test forms. |
 | `OWNER_GEMINI_MODEL` | `gemini-3.1-pro-preview` | Model for private-access visitors using the owner's key |
-| `OWNER_GEMINI_THINKING` | `LOW` | Thinking level for the owner's model. With the review instructions, `HIGH` took 25.6 s and ~$0.055 per page versus 12.2 s and ~$0.024 on `LOW`, with identical results. |
+| `OWNER_GEMINI_THINKING` | `HIGH` | Thinking level for the owner's model. `HIGH`: 25.6 s, ~$0.055 per page, review flags consistent (3/3 runs). `LOW`: 12.2 s, ~$0.024, same rows but flags caught hard handwriting only 2 of 5 runs. |
 | `PORT` | `8080` | Local server port |
 | `FLASK_DEBUG` | `0` | `1` enables auto-reload |
 
@@ -455,7 +455,7 @@ Instead of `X-Gemini-Key`, a request can send `X-Access-Code` to use the owner's
 | 12 | **Free-tier rate limits** | Free Gemini keys allow only a few requests per minute | Forms go one at a time, with a friendly "wait a minute" message; only failed forms retry |
 | 13 | **Status bug in the original code** | The "0 people" check came after "fewer than 2", so it could never run | Reordered the checks; 0 people now shows `NO_PERSONNEL` |
 | 14 | **Whole IAPs would waste money** | An IAP is 30–60+ pages but only a few are ICS-204s; sending all of them pays for pages nobody needs | Free in-browser page detection (PDF.js text, Tesseract.js OCR for scans) plus a page picker; only 204 pages are sent |
-| 15 | **Pro got 2x slower and pricier after adding review flags** | HIGH thinking spent many extra tokens reasoning about legibility (25.6 s, ~$0.055 per page) | Re-measured: LOW gave identical rows and flags at 12.2 s and ~$0.024, so LOW became the default |
+| 15 | **Pro got 2x slower and pricier after adding review flags** | HIGH thinking spends many extra tokens judging legibility (25.6 s, ~$0.055 per page) | Tried LOW: half the time and cost, but repeated runs on a blurred form showed it flagged hard handwriting only 2 of 5 times (HIGH: 3/3, Flash: 3/3). Kept HIGH, because a review flag that sometimes stays silent is worse than a slower one. Lesson: measure repeated runs, not just one. |
 
 ## Technical debt: where AI-written code needs care
 

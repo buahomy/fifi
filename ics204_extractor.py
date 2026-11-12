@@ -17,9 +17,11 @@ PUBLIC_THINKING = os.environ.get("GEMINI_THINKING", "LOW")
 
 # Private-access visitors using the owner's key: the owner's original Pro setup.
 OWNER_MODEL = os.environ.get("OWNER_GEMINI_MODEL", "gemini-3.1-pro-preview")
-# LOW, not HIGH: with the legibility instructions, HIGH took 25.6 s and ~$0.055 per page versus
-# 12.2 s and ~$0.024 on LOW, with identical rows and the same hard-to-read rows flagged (2026-11-12).
-OWNER_THINKING = os.environ.get("OWNER_GEMINI_THINKING", "LOW")
+# HIGH, measured 2026-11-12 on a deliberately degraded form, three runs each:
+#   Pro HIGH flagged the hard handwritten rows 3/3 times (25.6 s, ~$0.055 per page on average);
+#   Pro LOW was faster and cheaper (12.2 s, ~$0.024) but flagged them only 2 of 5 times.
+# Reliable review flags matter more than speed for the owner's invited users, so HIGH stays.
+OWNER_THINKING = os.environ.get("OWNER_GEMINI_THINKING", "HIGH")
 
 # Preview models (like gemini-3.1-pro-preview) are only served on v1beta.
 API_VERSION = "v1beta"
