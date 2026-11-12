@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ICS-204 Form Extractor</title>
+  <meta name="description" content="Upload ICS-204 Assignment List forms and turn them into an organized CSV with Google Gemini.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface-2: #243044;
+      --border: #2d3f56;
+      --text: #e8edf4;
+      --muted: #8b9cb3;
+      --accent: #e85d04;
+      --accent-hover: #f48c06;
+      --success: #2dc653;
+      --error: #ef476f;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    a { color: var(--accent-hover); }
+    code { background: var(--surface-2); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85em; }
+
+    .hero {
+      background: linear-gradient(135deg, #1a2332 0%, #0f1419 60%);
+      border-bottom: 1px solid var(--border);
+      padding: 2.5rem 1rem 2rem;
+    }
+
+    .hero-inner, .container { max-width: 900px; margin: 0 auto; }
+    .container { padding: 2rem 1rem 4rem; }
+
+    .logo { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+    .logo-icon {
+      width: 40px; height: 40px; flex: none;
+      background: linear-gradient(135deg, var(--accent), #dc2f02);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.25rem;
+    }
+
+    h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
+    .subtitle { color: var(--muted); font-size: 1rem; max-width: 600px; }
+
+    .steps { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1.25rem; color: var(--muted); font-size: 0.85rem; }
+    .steps span b { color: var(--text); }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .card-title {
+      font-size: 0.85rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    .key-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .key-row input[type=password], .key-row input[type=text] {
+      flex: 1 1 260px; min-width: 0;
+      background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.7rem 0.85rem; font-size: 0.95rem; font-family: ui-monospace, Menlo, monospace;
+    }
+    .key-row input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .key-help { color: var(--muted); font-size: 0.85rem; margin-top: 0.75rem; }
+    .key-help label { display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; color: var(--text); }
+    .key-status { font-size: 0.85rem; margin-top: 0.5rem; }
+    .key-status.ok { color: #86efac; }
+
+    .formats { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .format-badge {
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 0.35rem 0.75rem; font-size: 0.8rem; font-weight: 600; color: var(--muted);
+    }
+
+    .dropzone {
+      border: 2px dashed var(--border); border-radius: var(--radius);
+      padding: 2.5rem 1.25rem; text-align: center; cursor: pointer;
+      transition: border-color 0.15s, background 0.15s; position: relative;
+    }
+    .dropzone:hover, .dropzone.dragover { border-color: var(--accent); background: rgba(232, 93, 4, 0.06); }
+    .dropzone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .dropzone-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+    .dropzone p { color: var(--muted); font-size: 0.9rem; }
+    .dropzone strong { color: var(--accent); }
+
+    .file-list { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+    .file-item {
+      display: flex; align-items: center; gap: 0.75rem;
+      background: var(--surface-2); border-radius: 8px;
+      padding: 0.5rem 0.75rem; font-size: 0.875rem;
+    }
+    .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-state { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+    .file-state.done { color: #86efac; }
+    .file-state.failed { color: #fca5a5; white-space: normal; }
+    .file-item button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; }
+    .file-item button:hover { color: var(--error); }
+
+    .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.25rem; }
+    .btn {
+      padding: 0.75rem 1.5rem; border-radius: 8px; border: none;
+      font-size: 0.95rem; font-weight: 600; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+
+    .alert { padding: 0.875rem 1rem; border-radius: 8px; font-size: 0.875rem; margin-bottom: 1rem; }
+    .alert-error { background: rgba(239,71,111,0.12); border: 1px solid rgba(239,71,111,0.35); color: #fca5a5; }
+    .alert-success { background: rgba(45,198,83,0.12); border: 1px solid rgba(45,198,83,0.35); color: #86efac; }
+
+    .spinner {
+      width: 16px; height: 16px; display: inline-block; vertical-align: -3px;
+      border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .preview-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap; }
+    th { background: var(--surface-2); padding: 0.6rem 0.75rem; text-align: left; font-weight: 600; color: var(--muted); position: sticky; top: 0; }
+    td { padding: 0.55rem 0.75rem; border-top: 1px solid var(--border); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+
+    .status-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .status-OK { background: rgba(45,198,83,0.2); color: #86efac; }
+    .status-CRITICAL, .status-NO_PERSONNEL { background: rgba(239,71,111,0.2); color: #fca5a5; }
+    .status-COMMUNICATION { background: rgba(59,130,246,0.2); color: #93c5fd; }
+    .status-NO_RESOURCES { background: rgba(139,156,179,0.2); color: var(--muted); }
+
+    .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+    .stat-label { font-size: 0.8rem; color: var(--muted); }
+
+    .privacy { color: var(--muted); font-size: 0.8rem; text-align: center; margin-top: 2rem; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="logo">
+        <div class="logo-icon">🔥</div>
+        <h1>ICS-204 Form Extractor</h1>
+      </div>
+      <p class="subtitle">
+        Turn photos or scans of ICS-204 Assignment List forms, including handwritten ones, into an organized CSV you can sort and filter in Excel or Google Sheets.
+      </p>
+      <div class="steps">
+        <span><b>1.</b> Paste your Gemini key</span>
+        <span><b>2.</b> Add forms</span>
+        <span><b>3.</b> Extract and download CSV</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="error-alert" class="alert alert-error hidden"></div>
+    <div id="success-alert" class="alert alert-success hidden"></div>
+
+    <div class="card" id="key-card">
+      <div class="card-title">1 · Your Gemini API key</div>
+      <div class="key-row">
+        <input type="password" id="api-key" placeholder="Paste your key (starts with AIza…)" autocomplete="off" spellcheck="false">
+        <button type="button" class="btn btn-secondary" id="toggle-key">Show</button>
+      </div>
+      <div class="key-status hidden" id="server-key-note"></div>
+      <p class="key-help">
+        Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
+        Your key is sent only with your own requests to Google and is never stored on this server.
+      </p>
+      <p class="key-help">
+        <label><input type="checkbox" id="remember-key"> Remember on this device</label>
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">2 · Upload ICS-204 forms</div>
+      <div class="formats">
+        <span class="format-badge">JPG</span>
+        <span class="format-badge">PNG</span>
+        <span class="format-badge">WEBP</span>
+        <span class="format-badge">PDF</span>
+      </div>
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.webp,.pdf,image/png,image/jpeg,image/webp,application/pdf" multiple>
+        <div class="dropzone-icon">📋</div>
+        <p><strong>Click to browse</strong> or drag &amp; drop forms here</p>
+        <p>Photos are resized in your browser before upload · PDFs up to 4 MB</p>
+      </div>
+      <div class="file-list" id="file-list"></div>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="extract-btn" disabled>Extract data</button>
+        <button type="button" class="btn btn-secondary" id="download-btn" disabled>Download CSV</button>
+        <button type="button" class="btn btn-secondary" id="clear-btn" disabled>Clear</button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="results-card">
+      <div class="card-title">3 · Extracted data</div>
+      <div class="stats" id="stats"></div>
+      <div class="preview-wrap">
+        <table>
+          <thead id="preview-head"></thead>
+          <tbody id="preview-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="privacy">
+      Forms are sent to Google Gemini for reading and are not saved by this site. Always review the extracted data before using it for operations.
+    </p>
+  </main>
+
+  <script>
+    const ALLOWED = ['.png', '.jpg', '.jpeg', '.webp', '.pdf'];
+    const KEY_STORAGE = 'ics204_gemini_key';
+    const MAX_SIDE = 2400;          // longest side of a resized photo, in pixels
+    const RESIZE_OVER = 1.5e6;      // only re-encode photos bigger than ~1.5 MB
+    let MAX_UPLOAD = 4 * 1024 * 1024;
+    let COLUMNS = [];
+
+    // items: { file, state: 'ready'|'working'|'done'|'failed', message, rows }
+    let items = [];
+    let busy = false;
+
+    const $ = id => document.getElementById(id);
+    const keyInput = $('api-key');
+    const rememberBox = $('remember-key');
+
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    // ---- API key (kept in this browser only) ----
+    function storage(fn) { try { return fn(window.localStorage); } catch { return null; } }
+    const saved = storage(s => s.getItem(KEY_STORAGE));
+    if (saved) { keyInput.value = saved; rememberBox.checked = true; }
+
+    function persistKey() {
+      const key = keyInput.value.trim();
+      storage(s => rememberBox.checked && key ? s.setItem(KEY_STORAGE, key) : s.removeItem(KEY_STORAGE));
+      updateUI();
+    }
+    keyInput.addEventListener('input', persistKey);
+    rememberBox.addEventListener('change', persistKey);
+    $('toggle-key').addEventListener('click', () => {
+      const show = keyInput.type === 'password';
+      keyInput.type = show ? 'text' : 'password';
+      $('toggle-key').textContent = show ? 'Hide' : 'Show';
+    });
+
+    let serverKey = false;
+    fetch('/api/config').then(r => r.json()).then(cfg => {
+      COLUMNS = cfg.columns || [];
+      MAX_UPLOAD = (cfg.max_upload_mb || 4) * 1024 * 1024;
+      serverKey = !!cfg.server_key;
+      if (serverKey) {
+        const note = $('server-key-note');
+        note.textContent = 'This site has a shared key set up, so a key of your own is optional.';
+        note.classList.add('ok');
+        note.classList.remove('hidden');
+      }
+      updateUI();
+    }).catch(() => {});
+
+    // ---- Files ----
+    const isAllowed = name => ALLOWED.some(ext => name.toLowerCase().endsWith(ext));
+
+    function addFiles(files) {
+      for (const file of files) {
+        if (!isAllowed(file.name)) { showError(`${file.name}: unsupported file type.`); continue; }
+        if (items.some(i => i.file.name === file.name && i.file.size === file.size)) continue;
+        items.push({ file, state: 'ready', message: '', rows: [] });
+      }
+      updateUI();
+    }
+
+    $('file-input').addEventListener('change', e => { addFiles(Array.from(e.target.files)); e.target.value = ''; });
+    const dropzone = $('dropzone');
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      addFiles(Array.from(e.dataTransfer.files));
+    });
+
+    window.removeItem = i => { if (!busy) { items.splice(i, 1); updateUI(); renderResults(); } };
+
+    $('clear-btn').addEventListener('click', () => { items = []; hideAlerts(); updateUI(); renderResults(); });
+
+    // ---- UI ----
+    function hideAlerts() { $('error-alert').classList.add('hidden'); $('success-alert').classList.add('hidden'); }
+    function showError(msg) { $('error-alert').textContent = msg; $('error-alert').classList.remove('hidden'); }
+    function showSuccess(msg) { $('success-alert').textContent = msg; $('success-alert').classList.remove('hidden'); }
+
+    const allRows = () => items.flatMap(i => i.rows);
+
+    function stateLabel(item) {
+      if (item.state === 'working') return '<span class="spinner"></span> Reading…';
+      if (item.state === 'done') return `✓ ${item.rows.length} row(s)`;
+      if (item.state === 'failed') return esc(item.message);
+      return `${(item.file.size / 1024).toFixed(0)} KB`;
+    }
+
+    function updateUI() {
+      const hasKey = !!keyInput.value.trim() || serverKey;
+      const pending = items.some(i => i.state === 'ready' || i.state === 'failed');
+      $('extract-btn').disabled = busy || !hasKey || !pending;
+      $('extract-btn').innerHTML = busy ? '<span class="spinner"></span> Extracting…' : 'Extract data';
+      $('download-btn').disabled = busy || allRows().length === 0;
+      $('clear-btn').disabled = busy || items.length === 0;
+      $('file-list').innerHTML = items.map((item, i) => `
+        <div class="file-item">
+          <span class="file-name">${esc(item.file.name)}</span>
+          <span class="file-state ${item.state}">${stateLabel(item)}</span>
+          <button type="button" onclick="removeItem(${i})" title="Remove" ${busy ? 'disabled' : ''}>×</button>
+        </div>`).join('');
+    }
+
+    function renderResults() {
+      const rows = allRows();
+      if (!rows.length) { $('results-card').classList.add('hidden'); return; }
+      const cols = COLUMNS.length ? COLUMNS : Object.keys(rows[0]);
+      $('preview-head').innerHTML = '<tr>' + cols.map(c => `<th>${esc(c.replace(/_/g, ' '))}</th>`).join('') + '</tr>';
+      $('preview-body').innerHTML = rows.map(row => '<tr>' + cols.map(c => {
+        const val = row[c] ?? '';
+        if (c === 'status' && val) return `<td><span class="status-badge status-${esc(val)}">${esc(val)}</span></td>`;
+        return `<td title="${esc(val)}">${esc(val)}</td>`;
+      }).join('') + '</tr>').join('');
+      const count = s => rows.filter(r => r.status === s).length;
+      $('stats').innerHTML = `
+        <div><div class="stat-value">${items.filter(i => i.state === 'done').length}</div><div class="stat-label">Forms read</div></div>
+        <div><div class="stat-value">${rows.length}</div><div class="stat-label">Rows</div></div>
+        <div><div class="stat-value">${count('CRITICAL') + count('NO_PERSONNEL')}</div><div class="stat-label">Understaffed resources</div></div>`;
+      $('results-card').classList.remove('hidden');
+    }
+
+    // ---- Shrink big photos in the browser so uploads stay small ----
+    async function prepareFile(file) {
+      const isPdf = file.name.toLowerCase().endsWith('.pdf');
+      if (isPdf || file.size <= RESIZE_OVER) return file;
+      try {
+        const bitmap = await createImageBitmap(file);
+        const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(bitmap.width * scale);
+        canvas.height = Math.round(bitmap.height * scale);
+        canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
+        if (!blob) return file;
+        return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+      } catch {
+        return file;
+      }
+    }
+
+    async function extractOne(item) {
+      item.state = 'working';
+      updateUI();
+      try {
+        const upload = await prepareFile(item.file);
+        if (upload.size > MAX_UPLOAD) throw new Error(`Too large (${(upload.size / 1048576).toFixed(1)} MB). Max is ${MAX_UPLOAD / 1048576} MB.`);
+        const fd = new FormData();
+        fd.append('file', upload, upload.name);
+        const headers = {};
+        const key = keyInput.value.trim();
+        if (key) headers['X-Gemini-Key'] = key;
+        const res = await fetch('/api/extract', { method: 'POST', body: fd, headers });
+        let data = {};
+        try { data = await res.json(); } catch { /* non-JSON error page */ }
+        if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
+        item.rows = (data.rows || []).map(r => ({ ...r, source_file: item.file.name }));
+        item.state = 'done';
+      } catch (err) {
+        item.state = 'failed';
+        item.message = err.message || 'Failed';
+      }
+      updateUI();
+      renderResults();
+    }
+
+    $('extract-btn').addEventListener('click', async () => {
+      hideAlerts();
+      busy = true;
+      updateUI();
+      // One form at a time: friendlier to free-tier Gemini rate limits.
+      for (const item of items.filter(i => i.state === 'ready' || i.state === 'failed')) {
+        await extractOne(item);
+      }
+      busy = false;
+      updateUI();
+      const failed = items.filter(i => i.state === 'failed');
+      if (failed.length) showError(`${failed.length} form(s) failed. See the file list for details, then press Extract data to retry.`);
+      if (allRows().length) showSuccess(`${allRows().length} row(s) ready. Press Download CSV to save.`);
+    });
+
+    // ---- CSV download (built in the browser) ----
+    function toCsv(rows) {
+      const cols = COLUMNS.length ? COLUMNS : Object.keys(rows[0]);
+      const cell = v => {
+        let s = String(v ?? '');
+        if (/^[=+\-@]/.test(s)) s = "'" + s;   // stop spreadsheet formula injection
+        return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      return [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\r\n');
+    }
+
+    $('download-btn').addEventListener('click', () => {
+      const rows = allRows();
+      if (!rows.length) return;
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').replace(/(\d{8})/, '$1_');
+      const blob = new Blob(['﻿' + toCsv(rows)], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = Object.assign(document.createElement('a'), { href: url, download: `ics204_extracted_${stamp}.csv` });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    updateUI();
+  </script>
+</body>
+</html>

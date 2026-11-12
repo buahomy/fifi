@@ -1,9 +1,13 @@
+# Secrets
 .env
+.env.*
+
+# Private form images (never commit)
+input_forms/
+
+# Python / tooling
 __pycache__/
 *.pyc
-output/
 .venv/
-ics204_processor.log
+.vercel/
 .DS_Store
-.cursor/
-input_forms/
