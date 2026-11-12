@@ -43,7 +43,7 @@ Open **http://localhost:8080** and paste your Gemini key into the page.
 
 ## Deploy
 
-The repo is ready for **[Vercel](https://vercel.com)**: import it at vercel.com/new, keep the default settings, and deploy. Vercel detects the Flask app in `app.py` and serves `public/index.html` as the home page. `vercel.json` allows up to 300 seconds per request, because a detailed form can take Gemini 30–60 seconds.
+The repo is ready for **[Vercel](https://vercel.com)**: import it at vercel.com/new, keep the default settings, and deploy. Vercel detects the Flask app in `app.py` and serves `public/index.html` as the home page. No environment variables are needed: visitors bring their own keys. A detailed form takes Gemini 30–60 seconds, which is well within Vercel's default 300-second request limit.
 
 It also runs on any host that supports Python (Render, Railway, Fly.io, Cloud Run) with `gunicorn app:app`.
 
@@ -92,7 +92,6 @@ curl -H "X-Gemini-Key: $GEMINI_KEY" -F "file=@form.jpg" http://localhost:8080/ap
 app.py               Flask server: serves the page and the /api endpoints
 ics204_extractor.py  Gemini prompt + JSON schema, and flattening to CSV rows
 public/index.html    The whole front end (upload, key handling, preview, CSV export)
-vercel.json          Vercel function timeout
 requirements.txt     flask, google-genai
 ```
 
