@@ -171,6 +171,11 @@
     .status-NO_RESOURCES { background: rgba(139,156,179,0.2); color: var(--muted); }
 
     .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .usage { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 0.9rem; margin-bottom: 1rem; background: var(--surface-2); font-size: 0.8rem; color: var(--muted); }
+    .usage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin-bottom: 0.5rem; }
+    .usage-grid b { display: block; font-family: var(--mono); font-size: 1.05rem; color: var(--text); }
+    .usage-grid span { font-size: 0.72rem; }
+    .usage p b { color: var(--text); }
     .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
     .stat-label { font-size: 0.8rem; color: var(--muted); }
 
@@ -253,6 +258,7 @@
     <div class="card hidden" id="results-card">
       <div class="card-title">3 · Extracted data</div>
       <div class="stats" id="stats"></div>
+      <div class="usage hidden" id="usage" aria-live="polite"></div>
       <div class="preview-wrap">
         <table>
           <thead id="preview-head"></thead>
@@ -357,6 +363,8 @@
 
     fetch('/api/config').then(r => r.json()).then(async cfg => {
       COLUMNS = cfg.columns || [];
+      MODELS = cfg.models || {};
+      PRICING_SOURCE = cfg.pricing_source || null;
       MAX_UPLOAD = (cfg.max_upload_mb || 4) * 1024 * 1024;
       await setupAccess(cfg);
       updateUI();
@@ -397,7 +405,10 @@
 
     function stateLabel(item) {
       if (item.state === 'working') return '<span class="spinner"></span> Reading…';
-      if (item.state === 'done') return `✓ ${item.rows.length} row(s)`;
+      if (item.state === 'done') {
+        const u = item.usage;
+        return `✓ ${item.rows.length} row(s)` + (u ? ` · ${u.seconds}s · ${(u.tokens_in + u.tokens_out).toLocaleString()} tokens` : '');
+      }
       if (item.state === 'failed') return esc(item.message);
       return `${(item.file.size / 1024).toFixed(0)} KB`;
     }
@@ -432,7 +443,33 @@
         <div><div class="stat-value">${items.filter(i => i.state === 'done').length}</div><div class="stat-label">Forms read</div></div>
         <div><div class="stat-value">${rows.length}</div><div class="stat-label">Rows</div></div>
         <div><div class="stat-value">${count('CRITICAL') + count('NO_PERSONNEL')}</div><div class="stat-label">Understaffed resources</div></div>`;
+      renderUsage();
       $('results-card').classList.remove('hidden');
+    }
+
+    // ---- Transparency: what these extractions cost in Gemini calls, tokens, time and money ----
+    let MODELS = {}, PRICING_SOURCE = null;
+    function renderUsage() {
+      const used = items.filter(i => i.state === 'done' && i.usage).map(i => i.usage);
+      const box = $('usage');
+      if (!used.length) { box.classList.add('hidden'); return; }
+      const sum = k => used.reduce((s, u) => s + (u[k] || 0), 0);
+      const model = used[used.length - 1].model;
+      const info = Object.values(MODELS).find(m => m.id === model) || {};
+      const cost = sum('est_cost_usd');
+      const free = info.free_tier;
+      box.innerHTML = `
+        <div class="usage-grid">
+          <div><b>${used.length}</b><span>Gemini call${used.length === 1 ? '' : 's'}</span></div>
+          <div><b>${(sum('tokens_in') + sum('tokens_out')).toLocaleString()}</b><span>tokens (${sum('tokens_in').toLocaleString()} in · ${sum('tokens_out').toLocaleString()} out)</span></div>
+          <div><b>${(sum('seconds') / used.length).toFixed(1)}s</b><span>average per form</span></div>
+          <div><b>$${cost.toFixed(cost < 0.1 ? 4 : 2)}</b><span>est. cost at paid rates${free ? ' · $0 on a free-tier key' : ''}</span></div>
+        </div>
+        <p>Model: <b>${esc(info.label || model)}</b> · exactly 1 call per form ·
+          ${info.usd_per_1m?.input != null ? `$${info.usd_per_1m.input} in / $${info.usd_per_1m.output} out per 1M tokens` : ''}
+          ${free === false ? ' · no free tier: billed to the key owner' : ''}
+          ${PRICING_SOURCE ? ` · <a href="${esc(PRICING_SOURCE.url)}" target="_blank" rel="noopener">Google pricing</a>, read ${esc(PRICING_SOURCE.read)}` : ''}</p>`;
+      box.classList.remove('hidden');
     }
 
     // ---- Shrink big photos in the browser so uploads stay small ----
@@ -471,6 +508,7 @@
         try { data = await res.json(); } catch { /* non-JSON error page */ }
         if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
         item.rows = (data.rows || []).map(r => ({ ...r, source_file: item.file.name }));
+        item.usage = data.usage || null;
         item.state = 'done';
       } catch (err) {
         item.state = 'failed';

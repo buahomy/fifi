@@ -5,6 +5,7 @@ schema, then flatten the nested result into CSV-ready rows.
 
 import json
 import os
+import time
 
 from google import genai
 from google.genai import types
@@ -79,8 +80,48 @@ RESPONSE_SCHEMA = types.Schema(
 )
 
 
-def extract_form(client: genai.Client, data: bytes, mime_type: str, model: str, thinking: str) -> dict:
-    """Send one form to Gemini and return the parsed JSON. Raises on API errors."""
+# Official Gemini API paid-tier prices, USD per 1M tokens (output includes thinking tokens).
+# Source: https://aistudio.google.com/docs/pricing, read 2026-11-12. Update when Google changes them.
+PRICING = {
+    "gemini-3.8-flash": {
+        "label": "Gemini 3.8 Flash", "free_tier": True,
+        "rates": [  # (valid from, input, output)
+            ("2000-01-01", 0.75, 3.75),
+            ("2027-01-01", 1.50, 7.50),
+        ],
+    },
+    "gemini-3.1-pro-preview": {
+        "label": "Gemini 3.1 Pro Preview", "free_tier": False,
+        "rates": [("2000-01-01", 2.00, 12.00)],  # prompts <= 200k tokens (every ICS-204 is ~1.2k)
+    },
+}
+PRICING_SOURCE = {"url": "https://aistudio.google.com/docs/pricing", "read": "2026-11-12"}
+
+
+def current_rates(model: str, today: str | None = None):
+    """(input, output) USD per 1M tokens in effect today, or None if the model isn't priced here."""
+    info = PRICING.get(model)
+    if not info:
+        return None
+    today = today or time.strftime("%Y-%m-%d", time.gmtime())
+    rate = [r for r in info["rates"] if r[0] <= today][-1]
+    return rate[1], rate[2]
+
+
+def usage_summary(response, model: str, seconds: float) -> dict:
+    """Tokens, time and estimated paid-tier cost for one Gemini call."""
+    u = response.usage_metadata
+    tokens_in = u.prompt_token_count or 0
+    tokens_out = (u.candidates_token_count or 0) + (u.thoughts_token_count or 0)
+    rates = current_rates(model)
+    cost = round((tokens_in * rates[0] + tokens_out * rates[1]) / 1e6, 5) if rates else None
+    return {"model": model, "calls": 1, "seconds": round(seconds, 1),
+            "tokens_in": tokens_in, "tokens_out": tokens_out, "est_cost_usd": cost}
+
+
+def extract_form(client: genai.Client, data: bytes, mime_type: str, model: str, thinking: str):
+    """Send one form to Gemini (exactly one API call). Returns (parsed JSON, usage). Raises on API errors."""
+    started = time.time()
     response = client.models.generate_content(
         model=model,
         contents=[types.Content(role="user", parts=[
@@ -94,7 +135,7 @@ def extract_form(client: genai.Client, data: bytes, mime_type: str, model: str, 
             response_schema=RESPONSE_SCHEMA,
         ),
     )
-    return json.loads(response.text)
+    return json.loads(response.text), usage_summary(response, model, time.time() - started)
 
 
 def staffing_status(num_persons) -> str:

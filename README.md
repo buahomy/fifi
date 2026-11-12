@@ -72,7 +72,8 @@ On a wildfire, each operational period produces an **Incident Action Plan (IAP)*
 
 | Quality | Target | Measured / how |
 |---|---|---|
-| **Speed** | Average under 15 s per form | Flash: 5–13 s (about 11 s on a full form). Pro on a dense form: 14–16 s. The live site read a full form in 12 s. |
+| **Speed** | Average under 15 s per form | Measured on 4 real forms: Flash averages 9.2 s, Pro 10.9 s; dense forms take up to about 16 s. |
+| **Cost transparency** | Users see what AI they use and what it costs | Every result shows model, tokens, time and estimated cost (see [Transparency](#transparency-models-api-calls-and-cost)) |
 | **Reliability** | Never hang; clear errors | Each Gemini call is capped at 240 s (host limit 300 s). Friendly messages for a bad key, rate limit or timeout. |
 | **Security: API key** | Never stored on the server | Sent per request in a header, used once, never logged. The owner's key lives only in host environment variables. |
 | **Security: documents** | Confidential forms never kept | No database. Uploads stay in RAM only (`InMemoryRequest`) and are gone when the request ends. |
@@ -236,6 +237,46 @@ sequenceDiagram
 | **Fonts** | Space Grotesk, JetBrains Mono (Google Fonts) |
 | **Earlier versions** | pandas, Pillow, openpyxl (removed: the browser now builds the CSV and resizes photos) |
 
+### Choosing the OCR engine (a big part of the project)
+
+Much of the early time went into testing which tool reads ICS-204s best. An ICS-204 is hard for OCR: it's a **table**, it mixes **print and handwriting**, entries get **crossed out and replaced**, and photos are taken at angles on a phone. What mattered was not just reading the words, but getting them into the **right fields**.
+
+| Family | Tools looked at | Good at | Why it didn't fit ICS-204 |
+|---|---|---|---|
+| **Open-source OCR** | Tesseract (pytesseract), EasyOCR, PaddleOCR (incl. PP-Structure for tables), docTR, Kraken | Free, runs offline, solid on clean printed text | Returns loose words and boxes. Weak on handwriting and crossed-out entries. Rebuilding the table and mapping words to fields needs a lot of custom code. |
+| **Open-source document models** | TrOCR (handwriting), Surya (layout + OCR), Donut (OCR-free document understanding) | Better handwriting or layout awareness | Need GPU and fine-tuning on ICS-204 examples to fill our exact fields. Too heavy for a small project and a free serverless host. |
+| **Vision LLMs** | OpenAI GPT vision models, Anthropic Claude, Google Gemini, Mistral OCR, open models such as Qwen-VL and Llama Vision | Read handwriting *and* context ("this number is the crew size"), and fill a JSON schema directly | Cost per call and occasional misreads. Mitigated with a fixed schema and human review. |
+| **Cloud document AI** | **Amazon Textract** (Forms + Tables), Google Document AI (Form Parser), Azure AI Document Intelligence | Industrial-scale, accurate forms and tables, built for millions of pages | Overkill for a few ICS-204 pages: cloud account, IAM roles and storage buckets to set up, per-page billing, and you still write code to map generic key-value pairs onto ICS-204 fields. |
+
+**Decision: Google Gemini with structured output.** One API call turns a photo directly into JSON in the exact ICS-204 shape, handwriting included. It has a free tier for public visitors and a stronger Pro model for invited users, and needs no GPU, no cloud setup and only one Python library. The first prototype (`image_text_extractor.py`, now removed) used Gemini for plain-text OCR. That lost the table structure, which is what led to the schema approach used today.
+
+### Transparency: models, API calls and cost
+
+Measured on four real ICS-204 photos (5–23 rows each). Prices are Google's paid-tier rates from the [Gemini API pricing page](https://aistudio.google.com/docs/pricing), read 12 Nov 2026.
+
+| | Public site (visitor's own key) | Private access link (owner's key) |
+|---|---|---|
+| Model | `gemini-3.8-flash`, LOW thinking | `gemini-3.1-pro-preview`, HIGH thinking |
+| Gemini calls per form | **1** | **1** |
+| Average time per form | 9.2 s (range 4.7–14 s) | 10.9 s (range 6.6–16 s) |
+| Tokens per form | 1,164 in (same for every photo) · 458–2,072 out | 1,164 in · 697–2,220 out |
+| Price per 1M tokens | $0.75 in · $3.75 out (doubles on 1 Jan 2027) | $2.00 in · $12.00 out |
+| Cost per form | **≈ $0.005** (0.3–0.9¢), about 190 forms per $1 | **≈ $0.02** (1.1–2.9¢), about 50 forms per $1 |
+| Free tier | **Yes ($0)**, but Google may use free-tier content to improve its products | **No**: always billed to the key owner |
+
+**What calls happen when:**
+
+| Action | Calls | Gemini calls |
+|---|---|---|
+| Open the landing page | 2 to NIFC (incidents, perimeters) + 1 to `/api/hotspots`, which asks NASA at most once every 15 minutes | 0 |
+| Open an access link | 1 code check (`/api/access`) | 0 |
+| Extract a form | 1 upload → 1 Gemini call. Forms go one at a time, so a visitor makes at most about 6 calls per minute. | **1 per form** |
+| Preview, download CSV, view on map | Done in the browser from results already received | 0 |
+
+**Rate limits:** Google doesn't publish fixed per-minute limits for these two models. They depend on the key's usage tier (Free, Tier 1–3), are shown in [AI Studio](https://aistudio.google.com/rate-limit), reset daily at midnight Pacific time, and are tighter for preview models. When a limit is hit, fifi shows "rate limit reached, wait a minute" and only the failed forms are retried.
+
+**Live in the app:** every extraction returns its own `usage` (model, tokens in/out, seconds, estimated cost), and the extractor shows the running totals. `GET /api/config` publishes the models and prices in use.
+
 ---
 
 ## How it works
@@ -324,7 +365,7 @@ It also runs on any host that supports Python (Render, Railway, Fly.io, Cloud Ru
 
 ## API
 
-`POST /api/extract` takes `multipart/form-data` with one `file`, and optionally an `X-Gemini-Key` header. It returns `{"rows": [...]}`.
+`POST /api/extract` takes `multipart/form-data` with one `file`, and optionally an `X-Gemini-Key` header. It returns `{"rows": [...], "model": "...", "usage": {"calls": 1, "seconds": 9.2, "tokens_in": 1164, "tokens_out": 1167, "est_cost_usd": 0.0052}}`.
 
 ```bash
 curl -H "X-Gemini-Key: $GEMINI_KEY" -F "file=@form.jpg" http://localhost:8080/api/extract
@@ -343,7 +384,7 @@ Instead of `X-Gemini-Key`, a request can send `X-Access-Code` to use the owner's
 | File | What it does |
 |---|---|
 | `app.py` | The server. Serves the pages and the API (`/api/extract`, `/api/access`, `/api/config`, `/api/hotspots`). Decides which API key to use, keeps uploads in memory (`InMemoryRequest`), turns Gemini errors into friendly messages, and relays NASA satellite data with a 15-minute cache. |
-| `ics204_extractor.py` | The "brain". The prompt and the ICS-204 JSON schema sent to Gemini, the model settings, `flatten()` (one form → 33-column rows) and the staffing rules. |
+| `ics204_extractor.py` | The "brain". The prompt and the ICS-204 JSON schema sent to Gemini, the model settings, Google's published prices (`PRICING`) for the usage and cost report, `flatten()` (one form → 33-column rows) and the staffing rules. |
 | `public/index.html` | Landing page and live fire map: hero with live numbers, map layers and filters, IAP explainer, security section, FAQ. |
 | `public/extract.html` | The extractor: API key or access link, drag-and-drop upload, browser-side photo resizing, per-file progress, preview table, CSV download. |
 | `vercel.json` | Tells Vercel that `/extract` means `extract.html` (Vercel serves page files from its CDN). |

@@ -246,6 +246,23 @@
     .store-row .no { font-family: var(--mono); font-size: 0.78rem; color: var(--ok); }
     .store-row .no::before { content: "✓ "; }
     .sec-grid { margin-top: 1.5rem; }
+    .tx { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 2.25rem; }
+    .tx-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 1.25rem; }
+    .tx-card.pro { border-color: #7a5a20; }
+    .tx-card .nk { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ember); }
+    .tx-card.pro .nk { color: var(--gold); }
+    .tx-card h3 { font-size: 1.2rem; margin: 0.3rem 0 0.8rem; }
+    .tx-card dl { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; font-size: 0.86rem; }
+    .tx-card dt { color: var(--muted); }
+    .tx-card dd { font-family: var(--mono); text-align: right; font-size: 0.82rem; }
+    .tx-card dd small { color: var(--dim); }
+    .tx-card dd.yes { color: var(--ok); }
+    .tx-card dd.no { color: var(--gold); }
+    .tx-card p { color: var(--dim); font-size: 0.78rem; margin-top: 0.8rem; }
+    .tx-calls { margin-top: 1.5rem; }
+    .store-row .zero, .store-row .one { font-family: var(--mono); font-size: 0.8rem; }
+    .store-row .zero { color: var(--ok); }
+    .store-row .one { color: var(--flame); }
     .sec-grid code { font-family: var(--mono); font-size: 0.8em; background: var(--surface-2); padding: 0.05rem 0.3rem; border-radius: 4px; }
 
     /* ---------- FAQ ---------- */
@@ -274,6 +291,7 @@
       .step:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -0.95rem; transform: translateX(50%); }
       .iap { grid-template-columns: 1fr; }
       .flow { grid-template-columns: 1fr; }
+      .tx { grid-template-columns: 1fr; }
       .flow .link { height: 44px; }
       .flow .link::before { left: 50%; right: auto; top: 4px; bottom: 4px; border-top: none; border-left: 1px dashed var(--flame); }
       .store-row { grid-template-columns: 1fr; gap: 0.25rem; }
@@ -297,6 +315,7 @@
         <a href="#how">How it works</a>
         <a href="#iap">IAP</a>
         <a href="#security">Security</a>
+        <a href="#transparency">Transparency</a>
         <a href="#faq">FAQ</a>
         <a href="https://github.com/buahomy/fifi" target="_blank" rel="noopener">GitHub</a>
       </nav>
@@ -526,10 +545,65 @@
       </div>
     </section>
 
-    <!-- ================= 06 FAQ ================= -->
+    <!-- ================= 06 TRANSPARENCY ================= -->
+    <section id="transparency">
+      <div class="wrap">
+        <div class="sec-label">06 <i>//</i> Transparency</div>
+        <h2>Which AI reads your form, how often it's called, and what it costs.</h2>
+        <p class="sec-lede">Measured on four real ICS-204 photos (5 to 23 rows each). Prices are Google's published paid-tier rates, read 12 Nov 2026. The extractor shows the same numbers live for every form you process.</p>
+
+        <div class="tx">
+          <div class="tx-card">
+            <div class="nk">Your own key · public site</div>
+            <h3>Gemini 3.8 Flash</h3>
+            <dl>
+              <dt>API calls per form</dt><dd>1</dd>
+              <dt>Average time</dt><dd>9.2 s <small>(4.7–14 s)</small></dd>
+              <dt>Tokens per form</dt><dd>1,164 in · ~1,170 out</dd>
+              <dt>Price per 1M tokens</dt><dd>$0.75 in · $3.75 out</dd>
+              <dt>Cost per form</dt><dd><b>≈ $0.005</b> <small>(0.3–0.9¢)</small></dd>
+              <dt>Free tier</dt><dd class="yes">Yes: $0</dd>
+            </dl>
+            <p>Free-tier content may be used by Google to improve its products. Paid keys are not. Price doubles from 1 Jan 2027 (≈ $0.01 per form).</p>
+          </div>
+          <div class="tx-card pro">
+            <div class="nk">Private access link</div>
+            <h3>Gemini 3.1 Pro Preview</h3>
+            <dl>
+              <dt>API calls per form</dt><dd>1</dd>
+              <dt>Average time</dt><dd>10.9 s <small>(6.6–16 s)</small></dd>
+              <dt>Tokens per form</dt><dd>1,164 in · ~1,520 out</dd>
+              <dt>Price per 1M tokens</dt><dd>$2.00 in · $12.00 out</dd>
+              <dt>Cost per form</dt><dd><b>≈ $0.02</b> <small>(1.1–2.9¢)</small></dd>
+              <dt>Free tier</dt><dd class="no">None: billed to the owner</dd>
+            </dl>
+            <p>Higher-effort reasoning for invited users. About 50 forms per dollar, paid by the site owner, never by the visitor.</p>
+          </div>
+        </div>
+
+        <div class="store tx-calls">
+          <div class="store-row head"><span>When you…</span><span>Calls made</span><span>Gemini calls</span></div>
+          <div class="store-row"><span><b>Open the landing page</b></span><span>2 requests to NIFC (incidents, perimeters) + 1 to fifi's hotspot relay, which asks NASA at most once every 15 min</span><span class="zero">0</span></div>
+          <div class="store-row"><span><b>Open an access link</b></span><span>1 check of the code on fifi's server</span><span class="zero">0</span></div>
+          <div class="store-row"><span><b>Extract a form</b></span><span>1 upload to fifi → 1 request to Gemini. Forms go one at a time (about 6 per minute at most).</span><span class="one">1 per form</span></div>
+          <div class="store-row"><span><b>Preview, download CSV, view on map</b></span><span>Done in your browser from results you already have</span><span class="zero">0</span></div>
+        </div>
+
+        <p class="caption">Rate limits: Google doesn't publish fixed per-minute limits for these models. They depend on the key's usage tier and are shown in Google AI Studio, and preview models are more restricted. If a limit is hit, fifi says so and you retry only the forms that failed.</p>
+
+        <div class="grid-f sec-grid">
+          <div class="feat"><div class="k">Tested</div><h3>Open-source OCR</h3><p>Tesseract, EasyOCR, PaddleOCR, docTR, TrOCR, Surya. Good at printed text, but they return loose words, struggle with handwriting and corrections, and lose the table structure.</p></div>
+          <div class="feat"><div class="k">Tested</div><h3>Vision LLMs</h3><p>OpenAI GPT vision, Anthropic Claude, Mistral OCR, open models like Qwen-VL, and Google Gemini. LLMs read handwriting and context, and can fill a fixed schema directly.</p></div>
+          <div class="feat"><div class="k">Considered</div><h3>Cloud document AI</h3><p>Amazon Textract, Google Document AI, Azure Document Intelligence. Powerful, but built for high-volume pipelines: account and storage setup plus custom field mapping. Overkill for a few ICS-204 pages.</p></div>
+          <div class="feat"><div class="k">Chosen</div><h3>Gemini, with a schema</h3><p>One call returns structured JSON in the exact ICS-204 shape, handwriting included, with a free tier for public visitors and a stronger Pro model for invited users.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 07 FAQ ================= -->
     <section id="faq">
       <div class="wrap">
-        <div class="sec-label">06 <i>//</i> FAQ</div>
+        <div class="sec-label">07 <i>//</i> FAQ</div>
         <h2>Questions</h2>
         <div class="faq">
           <details><summary>Is fifi free?</summary><p>Yes. The site is free and open source. Extraction uses Google Gemini, so you either paste your own Gemini API key (Google AI Studio offers a free tier) or use a private access link from the site owner.</p></details>

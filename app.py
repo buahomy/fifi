@@ -24,8 +24,9 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 
-from ics204_extractor import (API_VERSION, COLUMNS, OWNER_MODEL, OWNER_THINKING,
-                              PUBLIC_MODEL, PUBLIC_THINKING, extract_form, flatten)
+from ics204_extractor import (API_VERSION, COLUMNS, OWNER_MODEL, OWNER_THINKING, PRICING,
+                              PRICING_SOURCE, PUBLIC_MODEL, PUBLIC_THINKING, current_rates,
+                              extract_form, flatten)
 
 ROOT = Path(__file__).parent
 PUBLIC = ROOT / "public"
@@ -180,6 +181,16 @@ def config():
         "access_code_required": bool(server_key() and access_code()),
         "columns": COLUMNS,
         "max_upload_mb": MAX_UPLOAD_MB,
+        # Transparency: which model each kind of visitor gets, and what a call costs.
+        "models": {
+            role: {"id": model, "thinking": thinking, "label": PRICING.get(model, {}).get("label", model),
+                   "free_tier": PRICING.get(model, {}).get("free_tier"),
+                   "usd_per_1m": dict(zip(("input", "output"), current_rates(model) or (None, None)))}
+            for role, model, thinking in (("own_key", PUBLIC_MODEL, PUBLIC_THINKING),
+                                          ("access_link", OWNER_MODEL, OWNER_THINKING))
+        },
+        "pricing_source": PRICING_SOURCE,
+        "calls_per_form": 1,
     })
 
 
@@ -208,7 +219,7 @@ def extract():
     client = genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(
         api_version=API_VERSION, timeout=GEMINI_TIMEOUT_MS))
     try:
-        data = extract_form(client, upload.read(), mime_type, model, thinking)
+        data, usage = extract_form(client, upload.read(), mime_type, model, thinking)
     except genai_errors.ClientError as e:
         if e.code == 429:
             return jsonify({"error": "Gemini rate limit reached. Wait a minute and try again."}), 429
@@ -224,7 +235,7 @@ def extract():
             return jsonify({"error": "Gemini took too long on this form. Press Extract data to try again."}), 504
         return jsonify({"error": "Couldn't reach Gemini. Try again shortly."}), 502
 
-    return jsonify({"rows": flatten(data, upload.filename), "model": model})
+    return jsonify({"rows": flatten(data, upload.filename), "model": model, "usage": usage})
 
 
 @app.errorhandler(413)
