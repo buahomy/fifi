@@ -40,6 +40,18 @@ The fire-power color ramp, the intensity and confidence filters, and the heatmap
 
 On a wildfire, each operational period produces an **Incident Action Plan (IAP)**. Its **ICS-204 Assignment List** says, per division, which crews and engines are assigned, how many people each has, the task, and the radio channels. It's printed, carried on the line, and corrected by hand, so it's hard to total up or search. **fifi** reads photos of those forms with AI, turns each one into rows in a spreadsheet, flags understaffed resources, and shows the incident on a live national fire map.
 
+### User pain points (why fifi exists)
+
+| Pain point | What it costs | How fifi helps |
+|---|---|---|
+| ICS-204s are **paper**, often photographed on a phone | Someone retypes them by hand, which is slow and error-prone | Snap a photo; AI fills the spreadsheet |
+| Forms are **corrected by hand** (crossed-out names, red-ink swaps) | Typed copies fall out of date; handwriting is hard to read | Gemini reads handwriting and corrections |
+| Each division has its **own page** | No quick way to total people or resources across the incident | All forms merge into one CSV with the same 33 columns |
+| **Understaffed crews** are buried in the table | A one-person resource is easy to miss | Automatic `CRITICAL` / `NO_PERSONNEL` flags and an "understaffed" count |
+| **Radio channels** are scattered across forms | The comms unit compiles them by hand | Channels come out as their own rows |
+| No link between the form and the **bigger picture** | You can't see the fire's size, containment or perimeter alongside your staffing | Your incident shows on a live national fire map |
+| Forms can hold **personal information** | Teams avoid tools that store documents | Nothing is stored: memory only, no database |
+
 ### Functional requirements (what it does)
 
 | # | Requirement | Where |
@@ -340,6 +352,24 @@ Instead of `X-Gemini-Key`, a request can send `X-Access-Code` to use the owner's
 | `README.md` | This document. |
 | `.env` *(local only, never committed)* | Your Gemini key and access code for running locally. |
 | `input_forms/` *(local only, never committed)* | Sample ICS-204 photos used for testing. They may contain real names, so they stay off GitHub. |
+
+## Development pain points (what went wrong and how it was fixed)
+
+| # | Pain point | Why it happened | Fix |
+|---|---|---|---|
+| 1 | **Private form photos went public** for a few minutes | The photos were committed, then the repo was made public. Deleting them in a new commit isn't enough, because old commits still hold them. | Made the repo private at once, rewrote history without the photos, and moved the clean code to a new public repo. Photos are now git-ignored. |
+| 2 | **A public site would spend my API key** | The first version used one server key for everyone | Visitors bring their own key. A private access code unlocks my key for my professor only. |
+| 3 | **"Model not found"** error | The newer Google SDK uses the `v1` API, but preview models only exist on `v1beta`. I wrongly assumed the model was retired. | Pointed every call at `v1beta`; the original Pro model works again |
+| 4 | **Requests timed out** on the live site (more than 300 s) | The AI's "think hard" setting took 100+ seconds per form | Tested a lower thinking level: about 10x faster with the same output. Added a 240 s cap with a clear error. |
+| 5 | **Phone photos too big** for the host | Vercel limits a request to about 4.5 MB | The browser shrinks photos first and sends one form per request |
+| 6 | **Each form was read by the AI twice** | Preview and Download each called the AI | Extract once; the browser builds the CSV from those results |
+| 7 | **AI output inserted into the page unsafely** | Text from Gemini went straight into the HTML (a cross-site scripting risk) | Every value is escaped before display, and CSV cells are guarded against spreadsheet formulas |
+| 8 | **"Never stored" wasn't strictly true** | Flask quietly writes uploads over 500 KB to a temporary file | Subclassed Flask's `Request` (`InMemoryRequest`) so uploads stay in RAM |
+| 9 | **`/extract` worked locally but 404'd live** | Vercel serves page files from its CDN, not from the Python app | Added a rewrite in `vercel.json` |
+| 10 | **Satellite data blocked in the browser** | NASA's file doesn't allow cross-site requests, and the Suomi NPP satellite stopped sending data | The server relays and caches it, and combines NOAA-20 + NOAA-21 |
+| 11 | **The original version wouldn't run** | Its environment broke when the folder moved, and the new Google SDK changed defaults | A fresh environment with the older SDK the code was written for (`google-genai` 1.75) |
+| 12 | **Free-tier rate limits** | Free Gemini keys allow only a few requests per minute | Forms go one at a time, with a friendly "wait a minute" message; only failed forms retry |
+| 13 | **Status bug in the original code** | The "0 people" check came after "fewer than 2", so it could never run | Reordered the checks; 0 people now shows `NO_PERSONNEL` |
 
 ## Technical debt: where AI-written code needs care
 
