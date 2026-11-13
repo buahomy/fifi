@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>fifi · Fire Ops</title>
+  <meta name="description" content="A live wildfire operations view: animated wind, 3D terrain, fire weather, Red Flag Warnings, radar, lightning, and a click-to-track briefing for any US wildfire.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0806; --surface: rgba(17, 12, 9, 0.86); --surface-solid: #150f0b; --surface-2: #211710;
+      --border: #3a271b; --border-soft: #2a1c13;
+      --text: #f4ebe3; --muted: #a8907f; --dim: #6f5c4f;
+      --ember: #ff5a1f; --flame: #ff8a3d; --gold: #ffc93c; --red: #ff3b30; --ok: #34d07a; --cyan: #5fd3ff;
+      --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+      --sans: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: var(--sans); background: var(--bg); color: var(--text); overflow: hidden; font-size: 14px; }
+    a { color: var(--flame); }
+    button { font: inherit; color: inherit; }
+
+    #map { position: fixed; inset: 0; background: #0d0a08; }
+    #wind { position: fixed; inset: 0; pointer-events: none; z-index: 1; }
+    /* faint scanlines + vignette for the ops-room look */
+    .fx { position: fixed; inset: 0; pointer-events: none; z-index: 2;
+      background: repeating-linear-gradient(0deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 3px),
+                  radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55)); }
+
+    /* ---------- top bar ---------- */
+    .top { position: fixed; top: 0; left: 0; right: 0; height: 48px; z-index: 10; display: flex; align-items: center; gap: 1rem;
+      padding: 0 14px; background: linear-gradient(180deg, rgba(11,8,6,0.95), rgba(11,8,6,0.6)); border-bottom: 1px solid var(--border-soft); backdrop-filter: blur(8px); }
+    .brand { font-family: var(--mono); font-weight: 600; font-size: 0.8rem; letter-spacing: 0.1em; text-transform: uppercase; text-decoration: none; color: var(--text); white-space: nowrap; }
+    .brand b { color: var(--ember); }
+    .brand span { color: var(--dim); font-weight: 400; }
+    .feeds { display: flex; gap: 0.4rem; overflow-x: auto; scrollbar-width: none; }
+    .feed { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 0.22rem 0.5rem; border: 1px solid var(--border); border-radius: 999px; color: var(--dim); white-space: nowrap; }
+    .feed::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--dim); margin-right: 0.4rem; vertical-align: 1px; }
+    .feed.ok { color: var(--muted); } .feed.ok::before { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+    .feed.load::before { background: var(--gold); animation: pulse 1s infinite; }
+    .feed.bad { color: var(--gold); } .feed.bad::before { background: var(--red); }
+    @keyframes pulse { 50% { opacity: 0.3; } }
+    .top .right { margin-left: auto; display: flex; align-items: center; gap: 0.9rem; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+    .top .right b { color: var(--text); }
+    .btn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.42rem 0.75rem; border-radius: 7px; border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+      font-family: var(--mono); font-size: 0.68rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; text-decoration: none; color: var(--text); cursor: pointer; white-space: nowrap; }
+    .btn:hover { border-color: var(--flame); }
+    .btn.on { border-color: var(--ember); background: rgba(255,90,31,0.16); }
+    .btn-fire { background: linear-gradient(135deg, var(--ember), #d62e00); border-color: transparent; }
+    #rail-toggle { display: none; }
+
+    /* ---------- panels ---------- */
+    .panel { position: fixed; z-index: 8; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; backdrop-filter: blur(10px); box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
+    .rail { top: 60px; left: 12px; width: 270px; bottom: 92px; overflow-y: auto; scrollbar-width: thin; }
+    .sec { padding: 0.75rem 0.85rem; border-bottom: 1px solid var(--border-soft); }
+    .sec:last-child { border-bottom: none; }
+    .h { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.5rem; display: flex; justify-content: space-between; gap: 0.5rem; }
+    .h span { color: var(--dim); letter-spacing: 0.03em; text-transform: none; }
+    .lyr { display: flex; align-items: center; gap: 0.55rem; padding: 0.22rem 0; cursor: pointer; font-size: 0.82rem; }
+    .lyr input { accent-color: var(--ember); }
+    .lyr .sw { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+    .lyr .meta { margin-left: auto; font-family: var(--mono); font-size: 0.66rem; color: var(--dim); }
+    .lyr kbd { font-family: var(--mono); font-size: 0.58rem; color: var(--dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 0.25rem; }
+    .field { width: 100%; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.42rem 0.55rem; font-family: var(--sans); font-size: 0.8rem; }
+    .field:focus { outline: 1px solid var(--ember); }
+    .watch { list-style: none; }
+    .watch li { display: grid; grid-template-columns: 1fr auto; gap: 0.1rem 0.5rem; padding: 0.42rem 0.3rem; border-bottom: 1px dashed var(--border-soft); cursor: pointer; }
+    .watch li:hover { background: rgba(255,90,31,0.07); }
+    .watch .n { font-weight: 500; font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .watch .s { font-family: var(--mono); font-size: 0.64rem; color: var(--dim); grid-column: 1 / -1; }
+    .watch .score { font-family: var(--mono); font-size: 0.7rem; font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 4px; align-self: center; }
+    .note { font-size: 0.7rem; color: var(--dim); line-height: 1.45; margin-top: 0.4rem; }
+
+    /* ---------- track panel ---------- */
+    .track { top: 60px; right: 12px; width: 360px; bottom: 92px; overflow-y: auto; display: none; scrollbar-width: thin; }
+    .track.show { display: block; animation: slidein 0.35s ease; }
+    @keyframes slidein { from { transform: translateX(24px); opacity: 0; } }
+    .tk-head { padding: 0.85rem 0.95rem 0.7rem; border-bottom: 1px solid var(--border-soft); position: sticky; top: 0; background: var(--surface-solid); z-index: 1; }
+    .tk-k { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ember); display: flex; justify-content: space-between; }
+    .tk-k button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.9rem; line-height: 1; }
+    .tk-t { font-size: 1.25rem; font-weight: 700; margin: 0.2rem 0 0.15rem; letter-spacing: -0.01em; }
+    .tk-sub { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); }
+    .tk-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.6rem; }
+    .tk-sec { padding: 0.8rem 0.95rem; border-bottom: 1px solid var(--border-soft); }
+    .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border-soft); border: 1px solid var(--border-soft); border-radius: 7px; overflow: hidden; }
+    .tile { background: rgba(11,8,6,0.75); padding: 0.5rem 0.55rem; }
+    .tile .v { font-family: var(--mono); font-size: 1.02rem; font-weight: 600; }
+    .tile .l { font-family: var(--mono); font-size: 0.56rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); margin-top: 0.1rem; }
+    .v.hot { color: var(--flame); } .v.red { color: #ff6b5f; } .v.ok { color: var(--ok); } .v.gold { color: var(--gold); }
+    .bar { height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin: 0.55rem 0 0.15rem; }
+    .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--ember), var(--gold)); }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.8rem; font-size: 0.78rem; }
+    .kv dt { color: var(--muted); } .kv dd { font-family: var(--mono); font-size: 0.74rem; text-align: right; }
+    canvas.chart { width: 100%; height: 92px; display: block; margin-top: 0.4rem; }
+    .legend-inline { display: flex; gap: 0.8rem; font-family: var(--mono); font-size: 0.6rem; color: var(--dim); margin-top: 0.25rem; flex-wrap: wrap; }
+    .legend-inline i { display: inline-block; width: 10px; height: 3px; vertical-align: 2px; margin-right: 0.3rem; }
+    .flag { display: block; margin-top: 0.5rem; padding: 0.45rem 0.55rem; border-radius: 6px; font-size: 0.76rem; border: 1px solid; }
+    .flag.crit { border-color: rgba(255,59,48,0.6); background: rgba(255,59,48,0.12); color: #ffb3ad; }
+    .flag.warn { border-color: rgba(255,201,60,0.5); background: rgba(255,201,60,0.08); color: #ffe39a; }
+    .flag.calm { border-color: rgba(52,208,122,0.45); background: rgba(52,208,122,0.08); color: #a7f0c6; }
+    .towns { list-style: none; margin-top: 0.3rem; }
+    .towns li { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.28rem 0; border-bottom: 1px dashed var(--border-soft); font-size: 0.8rem; }
+    .towns li span { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+    .muted { color: var(--muted); font-size: 0.76rem; }
+
+    /* ---------- timeline ---------- */
+    .timeline { left: 12px; right: 12px; bottom: 12px; height: 68px; display: flex; align-items: center; gap: 0.8rem; padding: 0 0.9rem; }
+    .timeline .lbl { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+    .tl-track { position: relative; flex: 1; height: 40px; }
+    #tl-hist { position: absolute; inset: 0 0 12px 0; width: 100%; height: 28px; }
+    #tl-range { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; accent-color: var(--ember); }
+    .tl-time { font-family: var(--mono); font-size: 0.78rem; color: var(--text); min-width: 118px; text-align: right; }
+    .tl-time small { display: block; color: var(--dim); font-size: 0.6rem; }
+
+    /* ---------- HUD ---------- */
+    .hud { position: fixed; z-index: 5; font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.05em; color: var(--muted); pointer-events: none; }
+    .hud b { color: var(--text); font-weight: 600; }
+    .hud-c { left: 50%; top: 50%; transform: translate(-50%, -50%); width: 44px; height: 44px; }
+    .hud-c::before, .hud-c::after { content: ""; position: absolute; background: rgba(255,138,61,0.55); }
+    .hud-c::before { left: 50%; top: 0; bottom: 0; width: 1px; } .hud-c::after { top: 50%; left: 0; right: 0; height: 1px; }
+    .hud-c i { position: absolute; inset: 14px; border: 1px solid rgba(255,138,61,0.7); border-radius: 50%; }
+    .hud-bl { left: 296px; bottom: 92px; background: rgba(11,8,6,0.7); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.55rem; }
+    .hud-track { left: 50%; top: 60px; transform: translateX(-50%); background: rgba(255,90,31,0.14); border: 1px solid var(--ember); color: var(--text); border-radius: 6px; padding: 0.3rem 0.7rem; display: none; letter-spacing: 0.12em; text-transform: uppercase; }
+    .hud-track.show { display: block; }
+    .bracket { position: fixed; z-index: 3; width: 26px; height: 26px; border-color: rgba(255,138,61,0.45); border-style: solid; pointer-events: none; }
+    .b1 { top: 56px; left: 6px; border-width: 1px 0 0 1px; } .b2 { top: 56px; right: 6px; border-width: 1px 1px 0 0; }
+    .b3 { bottom: 6px; left: 6px; border-width: 0 0 1px 1px; } .b4 { bottom: 6px; right: 6px; border-width: 0 1px 1px 0; }
+    .toast { position: fixed; z-index: 20; left: 50%; bottom: 96px; transform: translateX(-50%); background: var(--surface-solid); border: 1px solid var(--ember); border-radius: 8px; padding: 0.5rem 0.85rem; font-family: var(--mono); font-size: 0.72rem; display: none; }
+    .toast.show { display: block; }
+    .boot { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6rem; background: var(--bg); font-family: var(--mono); font-size: 0.74rem; color: var(--muted); transition: opacity 0.6s; }
+    .boot b { color: var(--ember); font-size: 0.85rem; letter-spacing: 0.2em; }
+    .boot.gone { opacity: 0; pointer-events: none; }
+
+    /* MapLibre theme */
+    .maplibregl-popup-content { background: var(--surface-solid); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.65rem 0.8rem; font-size: 0.78rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 280px; }
+    .maplibregl-popup-tip { border-top-color: var(--border) !important; border-bottom-color: var(--border) !important; }
+    .maplibregl-popup-close-button { color: var(--muted); }
+    .pk { font-family: var(--mono); font-size: 0.58rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ember); }
+    .pt { font-weight: 700; font-size: 0.92rem; margin: 0.1rem 0 0.3rem; }
+    .maplibregl-ctrl-group { background: var(--surface-solid) !important; border: 1px solid var(--border); }
+    .maplibregl-ctrl-group button + button { border-top: 1px solid var(--border) !important; }
+    .maplibregl-ctrl-icon { filter: invert(0.85); }
+    .maplibregl-ctrl-attrib { background: rgba(11,8,6,0.7) !important; color: var(--dim); font-size: 0.6rem; }
+    .maplibregl-ctrl-attrib a { color: var(--muted); }
+    .maplibregl-ctrl-top-right { top: 56px; right: 0; }
+    body.tracking .maplibregl-ctrl-top-right { right: 372px; }
+
+    @media (max-width: 860px) {
+      .feeds { display: none; }
+      #rail-toggle { display: inline-flex; }
+      .rail { display: none; bottom: auto; max-height: calc(100vh - 160px); width: min(300px, calc(100vw - 24px)); }
+      .rail.open { display: block; }
+      .track { top: auto; left: 8px; right: 8px; width: auto; bottom: 86px; max-height: 52vh; }
+      .hud-bl { display: none; }
+      .timeline { height: 62px; left: 8px; right: 8px; bottom: 8px; }
+      .timeline .lbl { display: none; }
+      .tl-time { min-width: 92px; font-size: 0.68rem; }
+      .timeline { gap: 0.5rem; padding: 0 0.6rem; }
+      #tl-live { display: none; }
+      .timeline .btn { padding: 0.42rem 0.55rem; }
+      .tl-track { min-width: 120px; }
+      body.tracking .maplibregl-ctrl-top-right { right: 0; }
+      .top .right .utc { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="boot" id="boot"><b>FIFI // FIRE OPS</b><span id="boot-msg">acquiring live feeds…</span></div>
+  <div id="map" role="region" aria-label="Fire operations map"></div>
+  <canvas id="wind" aria-hidden="true"></canvas>
+  <div class="fx"></div>
+  <div class="bracket b1"></div><div class="bracket b2"></div><div class="bracket b3"></div><div class="bracket b4"></div>
+
+  <header class="top">
+    <button class="btn" id="rail-toggle" aria-label="Layers">☰</button>
+    <a class="brand" href="/">🔥 <b>fifi</b> <span>// fire ops</span></a>
+    <div class="feeds" id="feeds">
+      <span class="feed load" data-feed="inc">Incidents</span>
+      <span class="feed load" data-feed="per">Perimeters</span>
+      <span class="feed load" data-feed="hot">VIIRS</span>
+      <span class="feed load" data-feed="wx">Wind</span>
+      <span class="feed load" data-feed="nws">NWS alerts</span>
+    </div>
+    <div class="right">
+      <span class="utc"><b id="utc">--:--:--</b> UTC</span>
+      <a class="btn btn-fire" href="/extract">Extract forms</a>
+    </div>
+  </header>
+
+  <aside class="panel rail" id="rail" aria-label="Layers and watchlist">
+    <div class="sec">
+      <div class="h">Fire</div>
+      <label class="lyr"><input type="checkbox" data-layer="incidents" checked><span class="sw" style="background:var(--red)"></span>Incidents<span class="meta" id="m-inc">…</span></label>
+      <label class="lyr"><input type="checkbox" data-layer="perimeters" checked><span class="sw" style="background:rgba(255,90,31,.45);border:1px solid var(--ember)"></span>Perimeters<span class="meta" id="m-per">…</span></label>
+      <label class="lyr"><input type="checkbox" data-layer="hotspots" checked><span class="sw" style="background:linear-gradient(90deg,#c1121f,#ffc93c)"></span>VIIRS hotspots<span class="meta" id="m-hot">…</span></label>
+      <label class="lyr"><input type="checkbox" data-layer="alerts" checked><span class="sw" style="background:rgba(255,59,48,.35);border:1px solid #ff3b30"></span>Red Flag &amp; Fire Wx<span class="meta" id="m-nws">…</span></label>
+    </div>
+    <div class="sec">
+      <div class="h">Atmosphere</div>
+      <label class="lyr"><input type="checkbox" data-layer="wind" checked><span class="sw" style="background:var(--cyan)"></span>Live wind <kbd>W</kbd><span class="meta" id="m-wind">…</span></label>
+      <label class="lyr"><input type="checkbox" data-layer="radar"><span class="sw" style="background:linear-gradient(90deg,#1fb84f,#ffe14d,#ff3b30)"></span>Radar (MRMS)</label>
+      <label class="lyr"><input type="checkbox" data-layer="ir"><span class="sw" style="background:linear-gradient(90deg,#222,#ddd)"></span>GOES infrared</label>
+      <label class="lyr"><input type="checkbox" data-layer="lightning"><span class="sw" style="background:#fff36b"></span>Lightning density</label>
+    </div>
+    <div class="sec">
+      <div class="h">Ground</div>
+      <label class="lyr"><input type="checkbox" data-layer="terrain"><span class="sw" style="background:#5b4a3a"></span>3D terrain <kbd>T</kbd></label>
+      <label class="lyr"><input type="checkbox" data-layer="imagery"><span class="sw" style="background:#3b4a32"></span>Satellite imagery</label>
+    </div>
+    <div class="sec">
+      <div class="h">Find a fire <span>/</span></div>
+      <input class="field" id="search" type="search" placeholder="Incident name…" aria-label="Search incidents" list="inc-names">
+      <datalist id="inc-names"></datalist>
+    </div>
+    <div class="sec">
+      <div class="h">Fire weather watchlist <span id="watch-n"></span></div>
+      <ul class="watch" id="watch"><li style="cursor:default"><span class="s">Scoring the largest active fires against live weather…</span></li></ul>
+      <p class="note">Ranked by the Hot-Dry-Windy Index (surface approximation: vapor pressure deficit × wind) at each fire right now. Higher means the air is drier, hotter and windier.</p>
+    </div>
+  </aside>
+
+  <aside class="panel track" id="track" aria-label="Tracked incident briefing" aria-live="polite"></aside>
+
+  <div class="panel timeline" aria-label="Satellite detection replay">
+    <button class="btn" id="tl-play" aria-label="Replay the last 24 hours">▶ Replay</button>
+    <span class="lbl">VIIRS · 24 h</span>
+    <div class="tl-track">
+      <canvas id="tl-hist"></canvas>
+      <input type="range" id="tl-range" min="0" max="1000" value="1000" aria-label="Detection time">
+    </div>
+    <div class="tl-time" id="tl-time">LIVE<small>all detections</small></div>
+    <button class="btn on" id="tl-live">Live</button>
+  </div>
+
+  <div class="hud hud-c"><i></i></div>
+  <div class="hud hud-bl"><b id="hud-ll">--.----, ---.----</b> · z<b id="hud-z">-</b> · brg <b id="hud-b">0</b>° · pitch <b id="hud-p">0</b>°</div>
+  <div class="hud hud-track" id="hud-track"></div>
+  <div class="toast" id="toast"></div>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script>
+  (() => {
+    // ================= constants & helpers =================
+    const WFIGS = 'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services';
+    const INC_URL = `${WFIGS}/WFIGS_Incident_Locations_Current/FeatureServer/0/query?` + new URLSearchParams({
+      where: "IncidentTypeCategory = 'WF'",
+      outFields: 'IncidentName,UniqueFireIdentifier,IncidentSize,PercentContained,POOState,POOCounty,FireDiscoveryDateTime,FireCause,FireBehaviorGeneral,TotalIncidentPersonnel,EstimatedCostToDate,IncidentComplexityLevel,ModifiedOnDateTime_dt',
+      outSR: '4326', resultRecordCount: '2000', f: 'geojson' });
+    const PER_URL = `${WFIGS}/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query?` + new URLSearchParams({
+      where: "attr_IncidentTypeCategory = 'WF'", outFields: 'poly_IncidentName,attr_UniqueFireIdentifier,attr_IncidentSize,attr_PercentContained',
+      maxAllowableOffset: '0.001', geometryPrecision: '5', outSR: '4326', f: 'geojson' });
+    const METEO = 'https://api.open-meteo.com/v1/forecast';
+    const AIRQ = 'https://air-quality-api.open-meteo.com/v1/air-quality';
+    const NWS = 'https://api.weather.gov/alerts/active?event=' + encodeURIComponent('Red Flag Warning,Fire Weather Watch');
+    const NOWCOAST = 'https://nowcoast.noaa.gov/geoserver/observations';
+    const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+    const PHOTON = 'https://photon.komoot.io/reverse';
+    const FRP_RAMP = [0, '#7a1d0b', 5, '#c1121f', 20, '#ff4d00', 50, '#ff8c1a', 100, '#ffc93c', 300, '#fff4d6'];
+
+    const $ = id => document.getElementById(id);
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const num = n => n == null || isNaN(n) ? '—' : Math.round(n).toLocaleString('en-US');
+    const compact = n => n == null || isNaN(n) ? '—' : new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+    const fc = features => ({ type: 'FeatureCollection', features });
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const fetchJson = (url, opts = {}, ms = 25000) => fetch(url, { ...opts, signal: AbortSignal.timeout(ms) }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+    const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    const compass = deg => COMPASS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
+    const R_EARTH = 6371;
+    const toRad = d => d * Math.PI / 180, toDeg = r => r * 180 / Math.PI;
+    function dest([lon, lat], bearingDeg, km) {           // great-circle destination point
+      const d = km / R_EARTH, b = toRad(bearingDeg), p1 = toRad(lat), l1 = toRad(lon);
+      const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+      const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+      return [toDeg(l2), toDeg(p2)];
+    }
+    function distKm([lo1, la1], [lo2, la2]) {
+      const dp = toRad(la2 - la1), dl = toRad(lo2 - lo1);
+      const a = Math.sin(dp / 2) ** 2 + Math.cos(toRad(la1)) * Math.cos(toRad(la2)) * Math.sin(dl / 2) ** 2;
+      return 2 * R_EARTH * Math.asin(Math.sqrt(a));
+    }
+    function bearing([lo1, la1], [lo2, la2]) {
+      const y = Math.sin(toRad(lo2 - lo1)) * Math.cos(toRad(la2));
+      const x = Math.cos(toRad(la1)) * Math.sin(toRad(la2)) - Math.sin(toRad(la1)) * Math.cos(toRad(la2)) * Math.cos(toRad(lo2 - lo1));
+      return (toDeg(Math.atan2(y, x)) + 360) % 360;
+    }
+    function inPoly([x, y], ring) {
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i], [xj, yj] = ring[j];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    }
+    // Hot-Dry-Windy Index, surface approximation: VPD (hPa) × wind (m/s).
+    function vpdHpa(tC, rh) { const es = 6.112 * Math.exp(17.67 * tC / (tC + 243.5)); return es * (1 - rh / 100); }
+    function hdw(tF, rh, windMph) { const tC = (tF - 32) * 5 / 9; return vpdHpa(tC, rh) * windMph * 0.44704; }
+    const hdwColor = v => v >= 300 ? '#ff3b30' : v >= 150 ? '#ff8a1f' : v >= 60 ? '#ffc93c' : '#34d07a';
+    const aqiInfo = a => a == null ? ['—', 'var(--muted)'] : a <= 50 ? ['Good', '#34d07a'] : a <= 100 ? ['Moderate', '#ffd166'] : a <= 150 ? ['Unhealthy for sensitive groups', '#ff8a1f'] : a <= 200 ? ['Unhealthy', '#ff3b30'] : a <= 300 ? ['Very unhealthy', '#b04fff'] : ['Hazardous', '#a0153e'];
+    function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2600); }
+    function feed(key, status, title) { const el = document.querySelector(`[data-feed="${key}"]`); if (!el) return; el.className = 'feed ' + status; if (title) el.title = title; }
+
+    setInterval(() => { $('utc').textContent = new Date().toISOString().slice(11, 19); }, 1000);
+
+    // ================= state =================
+    const state = { layers: { incidents: true, perimeters: true, hotspots: true, alerts: true, wind: true, radar: false, ir: false, lightning: false, terrain: false, imagery: false } };
+    let incidents = [], perimeters = null, hotspots = [], tracked = null, orbiting = false, map, mapReady = false;
+    let tlMin = 0, tlMax = 0, replaying = false, replayRaf = 0;
+
+    // ================= map =================
+    map = new maplibregl.Map({
+      container: 'map', style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      center: [-113, 40], zoom: 3.6, minZoom: 2, maxZoom: 16, maxPitch: 78, attributionControl: { compact: true },
+    });
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+    map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-right');
+    const hud = () => {
+      $('hud-z').textContent = map.getZoom().toFixed(1);
+      $('hud-b').textContent = Math.round((map.getBearing() + 360) % 360);
+      $('hud-p').textContent = Math.round(map.getPitch());
+    };
+    map.on('move', hud);
+    map.on('mousemove', e => { $('hud-ll').textContent = `${e.lngLat.lat.toFixed(4)}, ${e.lngLat.lng.toFixed(4)}`; });
+
+    const wms = (svc, layer, style = '') => `${NOWCOAST}/${svc}/ows?service=WMS&version=1.3.0&request=GetMap&layers=${layer}&styles=${style}&format=image/png&transparent=true&crs=EPSG:3857&width=256&height=256&bbox={bbox-epsg-3857}`;
+
+    map.on('load', () => {
+      const firstSymbol = map.getStyle().layers.find(l => l.type === 'symbol')?.id;
+
+      map.addSource('dem', { type: 'raster-dem', encoding: 'terrarium', tileSize: 256, maxzoom: 13,
+        tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], attribution: 'Terrain: Mapzen / AWS Open Data' });
+      map.addLayer({ id: 'hillshade', type: 'hillshade', source: 'dem', layout: { visibility: 'none' },
+        paint: { 'hillshade-shadow-color': '#000', 'hillshade-highlight-color': '#5a4636', 'hillshade-accent-color': '#2a1c13', 'hillshade-exaggeration': 0.55 } }, firstSymbol);
+
+      map.addSource('imagery', { type: 'raster', tileSize: 256, maxzoom: 18,
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' });
+      map.addLayer({ id: 'imagery', type: 'raster', source: 'imagery', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.9, 'raster-saturation': -0.25 } }, firstSymbol);
+
+      for (const [id, svc, layer, style, op] of [
+        ['ir', 'satellite', 'goes_longwave_imagery', 'goes-lir', 0.55],
+        ['radar', 'weather_radar', 'conus_base_reflectivity_mosaic', '', 0.7],
+        ['lightning', 'lightning_detection', 'ldn_lightning_strike_density', '', 0.85]]) {
+        map.addSource(id, { type: 'raster', tileSize: 256, tiles: [wms(svc, layer, style)], attribution: 'NOAA nowCOAST' });
+        map.addLayer({ id, type: 'raster', source: id, layout: { visibility: 'none' }, paint: { 'raster-opacity': op } }, firstSymbol);
+      }
+
+      map.addSource('alerts', { type: 'geojson', data: fc([]), attribution: 'NWS' });
+      map.addLayer({ id: 'alerts-fill', type: 'fill', source: 'alerts', paint: { 'fill-color': ['case', ['==', ['get', 'event'], 'Red Flag Warning'], '#ff3b30', '#ff9f1c'], 'fill-opacity': 0.16 } });
+      map.addLayer({ id: 'alerts-line', type: 'line', source: 'alerts', paint: { 'line-color': ['case', ['==', ['get', 'event'], 'Red Flag Warning'], '#ff3b30', '#ff9f1c'], 'line-width': 1.4, 'line-dasharray': [3, 2] } });
+
+      map.addSource('perimeters', { type: 'geojson', data: fc([]), attribution: 'NIFC WFIGS' });
+      map.addLayer({ id: 'perimeters-fill', type: 'fill', source: 'perimeters', paint: { 'fill-color': '#ff5a1f', 'fill-opacity': 0.2 } });
+      map.addLayer({ id: 'perimeters-line', type: 'line', source: 'perimeters', paint: { 'line-color': '#ff7a3d', 'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.6, 10, 2.2] } });
+
+      // Spread envelope + range rings for the tracked fire.
+      map.addSource('spread', { type: 'geojson', data: fc([]) });
+      map.addLayer({ id: 'spread-fill', type: 'fill', source: 'spread', filter: ['==', ['get', 'kind'], 'env'],
+        paint: { 'fill-color': ['interpolate', ['linear'], ['get', 'h'], 3, '#ff3b30', 6, '#ff8a1f', 12, '#ffc93c', 24, '#fff4d6'], 'fill-opacity': 0.13 } });
+      map.addLayer({ id: 'spread-line', type: 'line', source: 'spread', filter: ['==', ['get', 'kind'], 'env'],
+        paint: { 'line-color': ['interpolate', ['linear'], ['get', 'h'], 3, '#ff3b30', 6, '#ff8a1f', 12, '#ffc93c', 24, '#fff4d6'], 'line-width': 1.4, 'line-dasharray': [2, 2] } });
+      map.addLayer({ id: 'rings', type: 'line', source: 'spread', filter: ['==', ['get', 'kind'], 'ring'], paint: { 'line-color': 'rgba(95,211,255,0.45)', 'line-width': 1 } });
+      map.addLayer({ id: 'spread-labels', type: 'symbol', source: 'spread', filter: ['==', ['get', 'kind'], 'label'],
+        layout: { 'text-field': ['get', 'label'], 'text-font': ['Open Sans Regular'], 'text-size': 11, 'text-allow-overlap': true },
+        paint: { 'text-color': '#ffd9b8', 'text-halo-color': '#0b0806', 'text-halo-width': 1.4 } });
+      map.addSource('towns', { type: 'geojson', data: fc([]) });
+      map.addLayer({ id: 'towns', type: 'circle', source: 'towns', paint: { 'circle-radius': 4, 'circle-color': '#5fd3ff', 'circle-stroke-color': '#0b0806', 'circle-stroke-width': 1.5 } });
+      map.addLayer({ id: 'towns-label', type: 'symbol', source: 'towns', layout: { 'text-field': ['get', 'name'], 'text-font': ['Open Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.1], 'text-anchor': 'top' },
+        paint: { 'text-color': '#bdeeff', 'text-halo-color': '#0b0806', 'text-halo-width': 1.4 } });
+
+      map.addSource('hotspots', { type: 'geojson', data: fc([]), attribution: 'NASA FIRMS' });
+      map.addLayer({ id: 'hotspots-heat', type: 'heatmap', source: 'hotspots', maxzoom: 9, paint: {
+        'heatmap-weight': ['interpolate', ['linear'], ['get', 'frp'], 0, 0.15, 20, 0.6, 100, 1],
+        'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 2, 0.6, 8, 2],
+        'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 2, 6, 6, 14, 9, 24],
+        'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 0.15, '#7a1d0b', 0.35, '#c1121f', 0.55, '#ff4d00', 0.75, '#ff8c1a', 0.9, '#ffc93c', 1, '#fff4d6'],
+        'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.9, 8, 0.15] } });
+      map.addLayer({ id: 'hotspots-pts', type: 'circle', source: 'hotspots', minzoom: 5, paint: {
+        'circle-color': ['interpolate', ['linear'], ['get', 'frp'], ...FRP_RAMP],
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 1.8, 9, 4, 13, 8],
+        'circle-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0, 6.5, 0.95], 'circle-blur': 0.2 } });
+      // Replay: detections from the last 90 minutes of the scrubbed time flare up.
+      map.addLayer({ id: 'hotspots-new', type: 'circle', source: 'hotspots', filter: ['==', ['get', 'ts'], -1], paint: {
+        'circle-color': '#fff4d6', 'circle-blur': 0.8, 'circle-opacity': 0.85,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 5, 8, 10, 12, 18] } });
+
+      map.addSource('incidents', { type: 'geojson', data: fc([]), attribution: 'NIFC WFIGS' });
+      const base = ['interpolate', ['linear'], ['sqrt', ['coalesce', ['get', 'IncidentSize'], 0]], 0, 3.5, 30, 6, 100, 10, 300, 17, 600, 26];
+      const contain = ['case', ['==', ['get', 'PercentContained'], null], '#7d8a96', ['>=', ['get', 'PercentContained'], 100], '#7d8a96',
+        ['>=', ['get', 'PercentContained'], 75], '#ffd166', ['>=', ['get', 'PercentContained'], 25], '#ff8a1f', '#ff3b30'];
+      map.addLayer({ id: 'incidents-glow', type: 'circle', source: 'incidents', paint: { 'circle-color': contain, 'circle-blur': 1, 'circle-opacity': 0.35,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['*', base, 1.6], 9, ['*', base, 3]] } });
+      map.addLayer({ id: 'incidents', type: 'circle', source: 'incidents', paint: { 'circle-color': contain, 'circle-opacity': 0.92,
+        'circle-stroke-color': '#0b0806', 'circle-stroke-width': 1, 'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['*', base, 0.8], 9, ['*', base, 1.6]] } });
+      map.addLayer({ id: 'incidents-label', type: 'symbol', source: 'incidents', minzoom: 6.5,
+        layout: { 'text-field': ['get', 'IncidentName'], 'text-font': ['Open Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.3], 'text-anchor': 'top' },
+        paint: { 'text-color': '#ffd9b8', 'text-halo-color': '#0b0806', 'text-halo-width': 1.4 } });
+      map.addSource('focus', { type: 'geojson', data: fc([]) });
+      map.addLayer({ id: 'focus', type: 'circle', source: 'focus', paint: { 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': '#5fd3ff', 'circle-stroke-width': 2, 'circle-radius': 22 } });
+
+      for (const id of ['incidents', 'hotspots-pts', 'alerts-fill', 'towns']) {
+        map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
+      }
+      map.on('click', e => {
+        const hit = map.queryRenderedFeatures(e.point, { layers: ['incidents', 'hotspots-pts', 'towns', 'alerts-fill'] })[0];
+        if (!hit) return;
+        if (hit.layer.id === 'incidents') {
+          const f = incidents.find(x => x.properties.UniqueFireIdentifier === hit.properties.UniqueFireIdentifier);
+          if (f) track(f);
+        } else if (hit.layer.id === 'hotspots-pts') {
+          const p = hit.properties;
+          popup(e.lngLat, `<div class="pk">VIIRS hotspot · ${esc(p.sat)}</div><div class="pt">${p.frp} MW</div><div class="muted">${esc(String(p.t).replace('T', ' ').replace(/(\d{2})(\d{2})Z$/, '$1:$2 UTC'))} · ${p.dn === 'N' ? 'night' : 'day'} pass · ${({ h: 'high', n: 'nominal', l: 'low' })[p.conf] || '—'} confidence</div>`);
+        } else if (hit.layer.id === 'towns') {
+          popup(e.lngLat, `<div class="pk">In the downwind envelope</div><div class="pt">${esc(hit.properties.name)}</div><div class="muted">${hit.properties.km} km ${esc(hit.properties.dir)} of the fire</div>`);
+        } else {
+          const p = hit.properties;
+          popup(e.lngLat, `<div class="pk">${esc(p.event)}</div><div class="pt">${esc(p.area)}</div><div class="muted">${esc(p.headline)}</div><div class="muted" style="margin-top:.3rem">Until ${esc((p.ends || '').replace('T', ' ').slice(0, 16))}</div>`);
+        }
+      });
+      map.on('dragstart', () => { orbiting = false; syncOrbitBtn(); });
+
+      mapReady = true;
+      applyLayers();
+      if (perimeters) map.getSource('perimeters').setData(perimeters);
+      renderData();
+      wind.refresh();
+    });
+
+    function popup(lngLat, html) { new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(lngLat).setHTML(html).addTo(map); }
+
+    const LAYERS = {
+      incidents: ['incidents', 'incidents-glow', 'incidents-label'], perimeters: ['perimeters-fill', 'perimeters-line'],
+      hotspots: ['hotspots-heat', 'hotspots-pts', 'hotspots-new'], alerts: ['alerts-fill', 'alerts-line'],
+      radar: ['radar'], ir: ['ir'], lightning: ['lightning'], imagery: ['imagery'], terrain: ['hillshade'],
+    };
+    function applyLayers() {
+      if (!mapReady) return;
+      for (const [k, ids] of Object.entries(LAYERS)) for (const id of ids) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', state.layers[k] ? 'visible' : 'none');
+      map.setTerrain(state.layers.terrain ? { source: 'dem', exaggeration: 1.5 } : null);
+      $('wind').style.display = state.layers.wind ? 'block' : 'none';
+      document.querySelectorAll('[data-layer]').forEach(cb => { cb.checked = !!state.layers[cb.dataset.layer]; });
+    }
+    function setLayer(k, on) { state.layers[k] = on; applyLayers(); if (k === 'wind' && on) wind.refresh(); }
+    document.querySelectorAll('[data-layer]').forEach(cb => cb.addEventListener('change', () => setLayer(cb.dataset.layer, cb.checked)));
+
+    function renderData() {
+      if (!mapReady) return;
+      map.getSource('incidents').setData(fc(incidents.filter(f => !(f.properties.PercentContained >= 100))));
+      map.getSource('hotspots').setData(fc(hotspots.map(p => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p[0], p[1]] },
+        properties: { frp: p[2], conf: p[3], t: p[4], dn: p[5], sat: p[6], ts: p.ts } }))));
+    }
+
+    // ================= live wind field (Open-Meteo grid → particle advection) =================
+    const wind = (() => {
+      const cv = $('wind'), ctx = cv.getContext('2d');
+      let grid = null, particles = [], raf = 0, lastKey = '', fetching = false, dpr = 1, budget = 1;
+      const NX = 13, NY = 9, COUNT_PER_PX = 1 / 1700;
+
+      let scale = 1, slow = [], lastFrame = 0;   // scale < 1 renders the wind at reduced resolution on slow devices
+      function resize() {
+        dpr = Math.min(2, window.devicePixelRatio || 1) * scale;
+        cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+        cv.style.width = innerWidth + 'px'; cv.style.height = innerHeight + 'px';
+        seed();
+      }
+      function bounds() {
+        const b = map.getBounds();
+        return { w: Math.max(-179.9, b.getWest()), e: Math.min(179.9, b.getEast()), s: Math.max(-85, b.getSouth()), n: Math.min(85, b.getNorth()) };
+      }
+      async function refresh() {
+        if (!state.layers.wind || !mapReady || fetching) return;
+        const b = bounds();
+        const key = [b.w, b.e, b.s, b.n].map(v => v.toFixed(1)).join(',');
+        if (key === lastKey && grid) return;
+        fetching = true; feed('wx', 'load');
+        const lats = [], lons = [];
+        for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
+          lats.push((b.s + (b.n - b.s) * j / (NY - 1)).toFixed(3));
+          lons.push((b.w + (b.e - b.w) * i / (NX - 1)).toFixed(3));
+        }
+        try {
+          const url = `${METEO}?latitude=${lats.join(',')}&longitude=${lons.join(',')}&current=wind_speed_10m,wind_direction_10m&wind_speed_unit=ms`;
+          const data = await fetchJson(url, {}, 20000);
+          const arr = Array.isArray(data) ? data : [data];
+          const u = new Float32Array(NX * NY), v = new Float32Array(NX * NY);
+          let max = 0, sum = 0;
+          arr.forEach((d, k) => {
+            const s = d.current?.wind_speed_10m ?? 0, dir = d.current?.wind_direction_10m ?? 0;
+            // meteorological "from" direction → vector the air moves toward
+            u[k] = -s * Math.sin(toRad(dir)); v[k] = -s * Math.cos(toRad(dir));
+            max = Math.max(max, s); sum += s;
+          });
+          grid = { b, u, v, max };
+          lastKey = key;
+          $('m-wind').textContent = `${(sum / arr.length * 2.237).toFixed(0)} mph avg`;
+          feed('wx', 'ok', `Open-Meteo · ${arr.length} points · max ${(max * 2.237).toFixed(0)} mph`);
+          seed();
+        } catch { feed('wx', 'bad', 'Open-Meteo wind unavailable'); }
+        fetching = false;
+      }
+      function sample(lon, lat) {
+        if (!grid) return null;
+        const { b, u, v } = grid;
+        const fx = (lon - b.w) / (b.e - b.w) * (NX - 1), fy = (lat - b.s) / (b.n - b.s) * (NY - 1);
+        if (fx < 0 || fy < 0 || fx > NX - 1 || fy > NY - 1) return null;
+        const i = Math.min(NX - 2, Math.floor(fx)), j = Math.min(NY - 2, Math.floor(fy)), tx = fx - i, ty = fy - j;
+        const at = (a, ii, jj) => a[jj * NX + ii];
+        const lerp = a => (at(a, i, j) * (1 - tx) + at(a, i + 1, j) * tx) * (1 - ty) + (at(a, i, j + 1) * (1 - tx) + at(a, i + 1, j + 1) * tx) * ty;
+        return [lerp(u), lerp(v)];
+      }
+      function spawn() {
+        const b = grid ? grid.b : bounds();
+        return { lon: b.w + Math.random() * (b.e - b.w), lat: b.s + Math.random() * (b.n - b.s), age: Math.random() * 80 | 0 };
+      }
+      const target = () => Math.round(innerWidth * innerHeight * COUNT_PER_PX * (innerWidth < 860 ? 0.7 : 1)) + 250;
+      function seed() {
+        particles = Array.from({ length: Math.round(target() * budget) }, spawn);
+        ctx.clearRect(0, 0, cv.width, cv.height);
+      }
+      // adaptive: shrinks the particle count when frames run slow (3D terrain, weak GPUs)
+      function frame() {
+        raf = requestAnimationFrame(frame);
+        if (!grid || !state.layers.wind) { lastFrame = 0; return; }
+        const t0 = performance.now();
+        // Watch real frame intervals: if the device can't keep up, halve the resolution, then pause the animation.
+        if (lastFrame) {
+          slow.push(t0 - lastFrame);
+          const span = slow.reduce((x, y) => x + y, 0);
+          if (slow.length >= 20 || (span > 1500 && slow.length >= 3)) {
+            const med = slow.sort((a, b) => a - b)[slow.length >> 1]; slow = [];
+            if (med > 70 && scale > 0.5) { scale = 0.5; resize(); }
+            else if (med > 70) { lastFrame = 0; scale = 1; resize(); setLayer('wind', false); toast('Wind animation paused: this device is drawing slowly. Press W to try again.'); return; }
+          }
+        }
+        lastFrame = t0;
+        // fade previous frame → trails
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.fillStyle = 'rgba(0,0,0,0.92)';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineWidth = 1.3 * dpr;
+        const zoomScale = 0.0009 * Math.pow(2, 6 - map.getZoom());
+        // Bucket segments by speed so each frame is 6 strokes, not one per particle.
+        const B = 6, paths = Array.from({ length: B }, () => new Path2D());
+        for (const p of particles) {
+          const vel = sample(p.lon, p.lat);
+          if (!vel || p.age++ > 90) { Object.assign(p, spawn(), { age: 0, x: undefined }); continue; }
+          if (p.x === undefined) { const a = map.project([p.lon, p.lat]); p.x = a.x; p.y = a.y; }
+          const cosLat = Math.max(0.2, Math.cos(toRad(p.lat)));
+          p.lon += vel[0] * zoomScale / cosLat; p.lat += vel[1] * zoomScale;
+          const b2 = map.project([p.lon, p.lat]);
+          const k = Math.min(B - 1, Math.floor(Math.hypot(vel[0], vel[1]) / 18 * B));
+          paths[k].moveTo(p.x * dpr, p.y * dpr); paths[k].lineTo(b2.x * dpr, b2.y * dpr);
+          p.x = b2.x; p.y = b2.y;
+        }
+        for (let k = 0; k < B; k++) {
+          const t = (k + 0.5) / B;
+          ctx.strokeStyle = `rgba(${Math.round(95 + 160 * t)},${Math.round(211 - 90 * t)},${Math.round(255 - 200 * t)},${0.45 + 0.5 * t})`;
+          ctx.stroke(paths[k]);
+        }
+        const dt = performance.now() - t0;
+        if (dt > 12 && particles.length > 120) { particles.length = Math.floor(particles.length * 0.8); budget *= 0.8; }
+        else if (dt < 5 && budget < 1) { budget = Math.min(1, budget * 1.05); while (particles.length < target() * budget) particles.push(spawn()); }
+      }
+      addEventListener('resize', resize);
+      map.on('move', () => { ctx.clearRect(0, 0, cv.width, cv.height); for (const p of particles) p.x = undefined; });
+      let t; map.on('moveend', () => { clearTimeout(t); t = setTimeout(refresh, 450); });
+      resize(); frame();
+      return { refresh, sample };
+    })();
+
+    // ================= feeds =================
+    const incP = fetchJson(INC_URL).then(d => {
+      incidents = (d.features || []).filter(f => f.geometry && Array.isArray(f.geometry.coordinates));
+      const active = incidents.filter(f => !(f.properties.PercentContained >= 100));
+      $('m-inc').textContent = num(active.length);
+      $('inc-names').innerHTML = active.sort((a, b) => (b.properties.IncidentSize || 0) - (a.properties.IncidentSize || 0)).slice(0, 400)
+        .map(f => `<option value="${esc(f.properties.IncidentName)}">`).join('');
+      feed('inc', 'ok', `${active.length} active wildfires`);
+      renderData(); buildWatchlist(active);
+      deepLink();
+    }).catch(() => { feed('inc', 'bad'); $('m-inc').textContent = 'n/a'; });
+
+    fetchJson(PER_URL, {}, 40000).then(d => {
+      perimeters = d; $('m-per').textContent = num((d.features || []).length); feed('per', 'ok');
+      if (mapReady) map.getSource('perimeters').setData(d);
+    }).catch(() => { feed('per', 'bad'); $('m-per').textContent = 'n/a'; });
+
+    fetchJson('/api/hotspots', {}, 40000).then(d => {
+      hotspots = (d.points || []).map(p => { const ts = Date.parse(p[4].replace(/T(\d{2})(\d{2})Z$/, 'T$1:$2:00Z')); p.ts = isNaN(ts) ? 0 : ts / 60000; return p; });
+      $('m-hot').textContent = compact(hotspots.length);
+      feed('hot', d.stale ? 'bad' : 'ok', d.source);
+      const ts = hotspots.map(p => p.ts).filter(Boolean);
+      tlMin = Math.min(...ts); tlMax = Math.max(...ts);
+      drawHistogram(); renderData();
+    }).catch(() => { feed('hot', 'bad'); $('m-hot').textContent = 'n/a'; });
+
+    // NWS Red Flag Warnings & Fire Weather Watches. Zone-based alerts have no geometry, so fetch the zones.
+    (async () => {
+      try {
+        const d = await fetchJson(NWS, { headers: { Accept: 'application/geo+json' } });
+        const feats = [];
+        const zoneCache = new Map();
+        const need = [];
+        for (const a of d.features || []) {
+          const p = a.properties;
+          const props = { event: p.event, headline: p.headline || '', area: p.areaDesc || '', ends: p.ends || p.expires || '' };
+          if (a.geometry) feats.push({ type: 'Feature', geometry: a.geometry, properties: props });
+          else for (const z of (p.affectedZones || []).slice(0, 40)) need.push([z, props]);
+        }
+        const uniq = [...new Set(need.map(n => n[0]))].slice(0, 120);
+        for (let i = 0; i < uniq.length; i += 8) {
+          await Promise.all(uniq.slice(i, i + 8).map(z => fetchJson(z, { headers: { Accept: 'application/geo+json' } }, 15000).then(zd => zoneCache.set(z, zd.geometry)).catch(() => {})));
+        }
+        for (const [z, props] of need) { const g = zoneCache.get(z); if (g) feats.push({ type: 'Feature', geometry: g, properties: props }); }
+        const rf = (d.features || []).filter(a => a.properties.event === 'Red Flag Warning').length;
+        const fw = (d.features || []).length - rf;
+        $('m-nws').textContent = (d.features || []).length ? `${rf} RFW · ${fw} watch` : 'none active';
+        feed('nws', 'ok', `${rf} Red Flag Warnings, ${fw} Fire Weather Watches`);
+        const set = () => map.getSource('alerts').setData(fc(feats));
+        mapReady ? set() : map.once('load', set);
+      } catch { feed('nws', 'bad'); $('m-nws').textContent = 'n/a'; }
+    })();
+
+    Promise.allSettled([incP]).then(() => { $('boot').classList.add('gone'); });
+    setTimeout(() => $('boot').classList.add('gone'), 6000);
+
+    // ================= fire weather watchlist =================
+    async function buildWatchlist(active) {
+      // Fires that are still mostly open; nearly contained ones matter less even under bad weather.
+      const open = active.filter(f => (f.properties.PercentContained ?? 0) < 90);
+      const top = [...(open.length ? open : active)].sort((a, b) => (b.properties.IncidentSize || 0) - (a.properties.IncidentSize || 0)).slice(0, 40);
+      if (!top.length) { $('watch').innerHTML = '<li style="cursor:default"><span class="s">No active wildfires in the feed.</span></li>'; return; }
+      try {
+        const lat = top.map(f => f.geometry.coordinates[1].toFixed(3)).join(','), lon = top.map(f => f.geometry.coordinates[0].toFixed(3)).join(',');
+        const data = await fetchJson(`${METEO}?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,wind_direction_10m&wind_speed_unit=mph&temperature_unit=fahrenheit`);
+        const arr = Array.isArray(data) ? data : [data];
+        const rows = top.map((f, i) => {
+          const c = arr[i]?.current || {};
+          return { f, c, score: hdw(c.temperature_2m ?? 60, c.relative_humidity_2m ?? 50, c.wind_speed_10m ?? 0) };
+        }).sort((a, b) => b.score - a.score);
+        $('watch-n').textContent = `top ${Math.min(12, rows.length)} of ${rows.length}`;
+        $('watch').innerHTML = rows.slice(0, 12).map(({ f, c, score }) => `<li data-id="${esc(f.properties.UniqueFireIdentifier)}">
+          <span class="n">${esc(f.properties.IncidentName)}</span>
+          <span class="score" style="background:${hdwColor(score)}22;color:${hdwColor(score)}">${Math.round(score)}</span>
+          <span class="s">${compact(f.properties.IncidentSize)} ac · ${Math.round(c.relative_humidity_2m ?? 0)}% RH · ${Math.round(c.wind_speed_10m ?? 0)}G${Math.round(c.wind_gusts_10m ?? 0)} mph ${compass(c.wind_direction_10m ?? 0)} · ${Math.round(c.temperature_2m ?? 0)}°F</span></li>`).join('');
+      } catch {
+        $('watch').innerHTML = '<li style="cursor:default"><span class="s">Weather service unavailable; try again shortly.</span></li>';
+      }
+    }
+    $('watch').addEventListener('click', e => {
+      const li = e.target.closest('li[data-id]'); if (!li) return;
+      const f = incidents.find(x => x.properties.UniqueFireIdentifier === li.dataset.id); if (f) track(f);
+    });
+    $('search').addEventListener('change', e => {
+      const q = e.target.value.trim().toUpperCase(); if (!q) return;
+      const f = incidents.filter(x => String(x.properties.IncidentName || '').toUpperCase().includes(q))
+        .sort((a, b) => (b.properties.IncidentSize || 0) - (a.properties.IncidentSize || 0))[0];
+      f ? track(f) : toast('No active incident by that name');
+    });
+
+    // ================= tracking =================
+    function perimeterFor(f) {
+      const id = f.properties.UniqueFireIdentifier;
+      return perimeters?.features?.find(p => p.properties.attr_UniqueFireIdentifier === id) || null;
+    }
+    function rings(center) {
+      return [5, 10, 25].map(km => ({ type: 'Feature', properties: { kind: 'ring' },
+        geometry: { type: 'LineString', coordinates: Array.from({ length: 65 }, (_, i) => dest(center, i * 360 / 64, km)) } }))
+        .concat([5, 10, 25].map(km => ({ type: 'Feature', properties: { kind: 'label', label: `${km} km` }, geometry: { type: 'Point', coordinates: dest(center, 135, km) } })));
+    }
+
+    // Illustrative spread envelope: accumulates a forward run downwind, hour by hour, from forecast wind and humidity.
+    // A heuristic for visualization only, not a fire-behavior model (no fuels, slope or suppression).
+    function spreadEnvelope(center, hourly) {
+      const out = [];
+      let fwd = 0;
+      const marks = { 3: null, 6: null, 12: null, 24: null };
+      const dirs = [];
+      for (let h = 0; h < Math.min(24, hourly.wind.length); h++) {
+        const w = hourly.wind[h] ?? 0, rh = hourly.rh[h] ?? 50;
+        const dryness = clamp((100 - rh) / 70, 0.15, 1.3);
+        fwd += (0.05 + 0.011 * Math.pow(w, 1.45)) * dryness;      // km per hour
+        dirs.push((hourly.dir[h] ?? 0) + 180);
+        if (marks[h + 1] === null) {
+          // mean toward-direction so far (vector average)
+          let sx = 0, sy = 0; for (const d of dirs) { sx += Math.sin(toRad(d)); sy += Math.cos(toRad(d)); }
+          marks[h + 1] = { km: fwd, dir: (toDeg(Math.atan2(sx, sy)) + 360) % 360 };
+        }
+      }
+      for (const h of [24, 12, 6, 3]) {
+        const m = marks[h]; if (!m) continue;
+        const back = Math.max(0.15, m.km * 0.12), side = Math.max(0.3, m.km * 0.32);
+        const a = (m.km + back) / 2, off = (m.km - back) / 2;
+        const ring = [];
+        for (let i = 0; i <= 72; i++) {
+          const t = toRad(i * 5), x = side * Math.sin(t), y = off + a * Math.cos(t);
+          const r = Math.hypot(x, y), ang = toDeg(Math.atan2(x, y)) + m.dir;
+          ring.push(dest(center, ang, r));
+        }
+        out.push({ type: 'Feature', properties: { kind: 'env', h }, geometry: { type: 'Polygon', coordinates: [ring] } });
+        out.push({ type: 'Feature', properties: { kind: 'label', label: `+${h}h` }, geometry: { type: 'Point', coordinates: dest(center, m.dir, m.km) } });
+      }
+      return { features: out, marks };
+    }
+
+    async function track(f) {
+      tracked = f;
+      const p = f.properties, c = f.geometry.coordinates;
+      document.body.classList.add('tracking');
+      $('rail').classList.remove('open');
+      $('hud-track').textContent = `◎ Tracking ${p.IncidentName}`;
+      $('hud-track').classList.add('show');
+      history.replaceState(null, '', `#fire=${encodeURIComponent(p.UniqueFireIdentifier)}`);
+      map.getSource('focus')?.setData(fc([{ type: 'Feature', geometry: f.geometry, properties: {} }]));
+      map.getSource('spread')?.setData(fc(rings(c)));
+      map.getSource('towns')?.setData(fc([]));
+      renderTrack(f, null);
+      $('track').classList.add('show');
+
+      // Pull everything in parallel: fire weather, air quality here and downwind, then towns.
+      const wxUrl = `${METEO}?latitude=${c[1]}&longitude=${c[0]}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,wind_direction_10m,precipitation_probability&forecast_hours=24&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto`;
+      let wx = null;
+      try { wx = await fetchJson(wxUrl); } catch { /* panel shows unavailable */ }
+      if (tracked !== f) return;
+
+      const cur = wx?.current || {};
+      const towardDir = ((cur.wind_direction_10m ?? 0) + 180) % 360;
+      const size = p.IncidentSize || 10;
+      const zoom = clamp(11.6 - Math.log10(size) * 0.85, 7.5, 12.5);
+      if (!state.layers.terrain) setLayer('terrain', true);
+      map.flyTo({ center: c, zoom, pitch: 62, bearing: towardDir, speed: 0.9, curve: 1.6, essential: true,
+        padding: innerWidth > 860 ? { right: 360, left: 280 } : { bottom: innerHeight * 0.35 } });
+
+      let env = null;
+      if (wx?.hourly) {
+        env = spreadEnvelope(c, { wind: wx.hourly.wind_speed_10m, rh: wx.hourly.relative_humidity_2m, dir: wx.hourly.wind_direction_10m });
+        map.getSource('spread').setData(fc(rings(c).concat(env.features)));
+      }
+      const aqPts = [c, dest(c, towardDir, 25), dest(c, towardDir, 60)];
+      const aq = await fetchJson(`${AIRQ}?latitude=${aqPts.map(x => x[1].toFixed(3)).join(',')}&longitude=${aqPts.map(x => x[0].toFixed(3)).join(',')}&current=us_aqi,pm2_5`).catch(() => null);
+      if (tracked !== f) return;
+      const aqArr = aq ? (Array.isArray(aq) ? aq : [aq]).map(x => x.current || {}) : null;
+      renderTrack(f, { wx, env, aq: aqArr, towardDir });
+      if (env?.marks[24]) findTowns(f, c, env);
+    }
+
+    async function findTowns(f, c, env) {
+      const outer = env.features.find(x => x.properties.kind === 'env' && x.properties.h === 24);
+      if (!outer) return;
+      const ring = outer.geometry.coordinates[0];
+      const lons = ring.map(x => x[0]), lats = ring.map(x => x[1]);
+      const pad = 0.05;
+      const bbox = [Math.min(...lats) - pad, Math.min(...lons) - pad, Math.max(...lats) + pad, Math.max(...lons) + pad].map(v => v.toFixed(4)).join(',');
+      // Photon (OpenStreetMap places, fast) around three points on the downwind axis; Overpass as a fallback.
+      let elements = null;
+      try {
+        const probes = [6, 12, 24].map(h => env.marks[h]).filter(Boolean).map(m => ({ at: dest(c, m.dir, m.km * 0.6), r: clamp(m.km * 0.6 + 4, 5, 45) }));
+        const seen = new Map();
+        const res = await Promise.all(probes.map(({ at, r }) => fetchJson(`${PHOTON}?lat=${at[1].toFixed(4)}&lon=${at[0].toFixed(4)}&radius=${r.toFixed(0)}&limit=40&layer=city&layer=locality&layer=district`, {}, 10000).catch(() => null)));
+        if (res.some(Boolean)) {
+          for (const d of res) for (const ft of d?.features || []) {
+            const pr = ft.properties || {};
+            if (pr.osm_key !== 'place' || !/^(city|town|village|hamlet)$/.test(pr.osm_value)) continue;
+            seen.set(pr.osm_id, { lon: ft.geometry.coordinates[0], lat: ft.geometry.coordinates[1], tags: { name: pr.name, place: pr.osm_value } });
+          }
+          elements = [...seen.values()];
+        }
+      } catch { /* fall through to Overpass */ }
+      if (!elements) {
+        const q = `[out:json][timeout:10];node[place~"^(city|town|village|hamlet)$"](${bbox});out 80;`;
+        for (const host of OVERPASS) {
+          try { elements = (await fetchJson(`${host}?data=${encodeURIComponent(q)}`, {}, 9000)).elements; break; } catch { /* try next mirror */ }
+        }
+      }
+      if (tracked !== f) return;
+      const box = $('towns-box');
+      if (!elements) { if (box) box.innerHTML = '<p class="muted">Place lookup (OpenStreetMap) is busy right now. Try tracking again in a minute.</p>'; return; }
+      const hits = elements.filter(e => e.tags?.name && inPoly([e.lon, e.lat], ring))
+        .map(e => ({ name: e.tags.name, place: e.tags.place, pop: +e.tags.population || null, km: distKm(c, [e.lon, e.lat]), dir: compass(bearing(c, [e.lon, e.lat])), lon: e.lon, lat: e.lat }))
+        .sort((a, b) => a.km - b.km);
+      map.getSource('towns').setData(fc(hits.map(t => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [t.lon, t.lat] }, properties: { name: t.name, km: t.km.toFixed(1), dir: t.dir } }))));
+      tracked._towns = hits;
+      if (box) box.innerHTML = hits.length
+        ? `<ul class="towns">${hits.slice(0, 10).map(t => `<li>${esc(t.name)} <span>${t.km.toFixed(1)} km ${t.dir}${t.pop ? ' · pop ' + compact(t.pop) : ''}</span></li>`).join('')}</ul>${hits.length > 10 ? `<p class="muted">+${hits.length - 10} more on the map</p>` : ''}`
+        : '<p class="muted">No named places inside the 24-hour envelope.</p>';
+    }
+
+    function nearbyHotspots(f) {
+      const c = f.geometry.coordinates;
+      const per = perimeterFor(f);
+      const radius = Math.max(4, Math.sqrt((f.properties.IncidentSize || 10) * 0.004047 / Math.PI) * 2.2);
+      const rings = per ? (per.geometry.type === 'Polygon' ? [per.geometry.coordinates[0]] : per.geometry.coordinates.map(pg => pg[0])) : null;
+      return hotspots.filter(h => {
+        const d = distKm(c, [h[0], h[1]]);
+        if (d <= radius) return true;
+        return rings && d < radius * 4 && rings.some(r => inPoly([h[0], h[1]], r));
+      });
+    }
+
+    function renderTrack(f, extra) {
+      const p = f.properties, pct = p.PercentContained;
+      const hs = nearbyHotspots(f);
+      const frpSum = hs.reduce((s, h) => s + h[2], 0), frpMax = hs.reduce((m, h) => Math.max(m, h[2]), 0);
+      const last = hs.reduce((m, h) => Math.max(m, h.ts || 0), 0);
+      const lastAgo = last ? Math.round((Date.now() / 60000 - last) / 60 * 10) / 10 : null;
+      const night = hs.filter(h => h[5] === 'N').length;
+      const wx = extra?.wx, cur = wx?.current || {};
+      const nowHdw = wx ? hdw(cur.temperature_2m, cur.relative_humidity_2m, cur.wind_speed_10m) : null;
+
+      let outlook = '';
+      if (wx?.hourly) {
+        const H = wx.hourly;
+        const crit = H.time.map((t, i) => ({ t, rh: H.relative_humidity_2m[i], g: H.wind_gusts_10m[i] })).filter(x => x.rh <= 15 && x.g >= 25);
+        const elev = H.time.map((t, i) => ({ t, rh: H.relative_humidity_2m[i], g: H.wind_gusts_10m[i] })).filter(x => x.rh <= 25 && x.g >= 20);
+        const peak = H.wind_gusts_10m.reduce((m, g, i) => g > H.wind_gusts_10m[m] ? i : m, 0);
+        const minRh = Math.min(...H.relative_humidity_2m);
+        const hh = t => t.slice(11, 16);
+        outlook = crit.length
+          ? `<span class="flag crit">⚠ <b>Critical fire weather</b>: ${crit.length} of the next 24 hours meet Red-Flag-like thresholds (RH ≤ 15% with gusts ≥ 25 mph), first at ${hh(crit[0].t)} local.</span>`
+          : elev.length ? `<span class="flag warn">▲ <b>Elevated</b>: ${elev.length} hours with RH ≤ 25% and gusts ≥ 20 mph. Peak gusts ${Math.round(H.wind_gusts_10m[peak])} mph at ${hh(H.time[peak])}.</span>`
+          : `<span class="flag calm">● <b>Moderate</b>: no hours reach elevated thresholds. Lowest RH ${Math.round(minRh)}%, peak gusts ${Math.round(H.wind_gusts_10m[peak])} mph.</span>`;
+      }
+      const env = extra?.env;
+      const aq = extra?.aq;
+      const aqRow = (label, a) => { const [txt, col] = aqiInfo(a?.us_aqi); return `<dt>${label}</dt><dd style="color:${col}">${a?.us_aqi ?? '—'} · ${txt}${a?.pm2_5 != null ? ` · PM2.5 ${Math.round(a.pm2_5)}` : ''}</dd>`; };
+
+      $('track').innerHTML = `
+        <div class="tk-head">
+          <div class="tk-k"><span>Tracking · ${esc(p.UniqueFireIdentifier || '')}</span><button id="tk-close" aria-label="Stop tracking">✕</button></div>
+          <div class="tk-t">${esc(p.IncidentName)}</div>
+          <div class="tk-sub">${esc([p.POOCounty, (p.POOState || '').replace('US-', '')].filter(Boolean).join(', '))} · ${esc(p.IncidentComplexityLevel || 'complexity n/a')} · updated ${p.ModifiedOnDateTime_dt ? Math.max(0, Math.round((Date.now() - p.ModifiedOnDateTime_dt) / 3.6e6)) + 'h ago' : '—'}</div>
+          <div class="tk-actions">
+            <button class="btn ${orbiting ? 'on' : ''}" id="tk-orbit">⟳ Orbit <span style="color:var(--dim)">O</span></button>
+            <button class="btn" id="tk-sitrep">⧉ Copy SITREP</button>
+            <button class="btn" id="tk-link">🔗 Link</button>
+          </div>
+        </div>
+        <div class="tk-sec">
+          <div class="tiles">
+            <div class="tile"><div class="v hot">${compact(p.IncidentSize)}</div><div class="l">acres</div></div>
+            <div class="tile"><div class="v ${pct >= 75 ? 'ok' : pct >= 25 ? 'gold' : 'red'}">${pct == null ? '—' : pct + '%'}</div><div class="l">contained</div></div>
+            <div class="tile"><div class="v">${num(p.TotalIncidentPersonnel)}</div><div class="l">personnel</div></div>
+          </div>
+          ${pct != null ? `<div class="bar"><i style="width:${Math.min(100, pct)}%"></i></div>` : ''}
+          <dl class="kv" style="margin-top:.55rem">
+            <dt>Behavior</dt><dd>${esc(p.FireBehaviorGeneral || '—')}</dd>
+            <dt>Cause</dt><dd>${esc(p.FireCause || '—')}</dd>
+            <dt>Est. cost</dt><dd>${p.EstimatedCostToDate ? '$' + compact(p.EstimatedCostToDate) : '—'}</dd>
+            <dt>Discovered</dt><dd>${p.FireDiscoveryDateTime ? new Date(p.FireDiscoveryDateTime).toISOString().slice(0, 10) : '—'}</dd>
+          </dl>
+        </div>
+        <div class="tk-sec">
+          <div class="h">Satellite heat · 24 h <span>VIIRS 375 m</span></div>
+          <div class="tiles">
+            <div class="tile"><div class="v hot">${hs.length}</div><div class="l">detections</div></div>
+            <div class="tile"><div class="v">${Math.round(frpSum)}</div><div class="l">total MW</div></div>
+            <div class="tile"><div class="v gold">${frpMax ? Math.round(frpMax) : '—'}</div><div class="l">peak MW</div></div>
+          </div>
+          <canvas class="chart" id="ch-heat" height="70"></canvas>
+          <p class="muted">${hs.length ? `Last detection ${lastAgo != null ? lastAgo + ' h ago' : '—'} · ${night} at night${night ? ' (still burning after dark)' : ''}.` : 'No VIIRS detections near this fire in the last 24 h: it may be smoldering, under cloud, or small.'}</p>
+        </div>
+        <div class="tk-sec">
+          <div class="h">Fire weather · next 24 h <span>Open-Meteo</span></div>
+          ${wx ? `<div class="tiles">
+            <div class="tile"><div class="v">${Math.round(cur.temperature_2m)}°F</div><div class="l">temp</div></div>
+            <div class="tile"><div class="v ${cur.relative_humidity_2m <= 15 ? 'red' : cur.relative_humidity_2m <= 25 ? 'gold' : ''}">${Math.round(cur.relative_humidity_2m)}%</div><div class="l">humidity</div></div>
+            <div class="tile"><div class="v ${cur.wind_gusts_10m >= 25 ? 'red' : ''}">${Math.round(cur.wind_speed_10m)}<small style="font-size:.6em">G${Math.round(cur.wind_gusts_10m)}</small></div><div class="l">mph ${compass(cur.wind_direction_10m)}</div></div>
+          </div>
+          <dl class="kv" style="margin-top:.55rem"><dt>Hot-Dry-Windy now</dt><dd style="color:${hdwColor(nowHdw)}">${Math.round(nowHdw)}</dd>
+          <dt>Smoke & fire push toward</dt><dd>${compass(extra.towardDir)} (${Math.round(extra.towardDir)}°)</dd></dl>
+          <canvas class="chart" id="ch-wx" height="92"></canvas>
+          <div class="legend-inline"><span><i style="background:#5fd3ff"></i>wind</span><span><i style="background:#ff8a3d"></i>gusts</span><span><i style="background:#ffc93c"></i>humidity %</span><span><i style="background:rgba(255,59,48,.5)"></i>critical hour</span></div>
+          ${outlook}` : `<p class="muted">${extra ? 'Weather forecast unavailable right now.' : 'Loading forecast…'}</p>`}
+        </div>
+        <div class="tk-sec">
+          <div class="h">Spread envelope <span>illustrative</span></div>
+          ${env ? `<dl class="kv">${[3, 6, 12, 24].map(h => env.marks[h] ? `<dt>+${h} h</dt><dd>${env.marks[h].km.toFixed(1)} km toward ${compass(env.marks[h].dir)}</dd>` : '').join('')}</dl>
+          <p class="note">A simple heuristic from forecast wind and humidity: how far a free-running head could travel if nothing stopped it. It ignores fuels, slope, terrain and suppression. Not a fire-behavior prediction; follow official incident updates.</p>` : '<p class="muted">Needs the weather forecast.</p>'}
+        </div>
+        <div class="tk-sec">
+          <div class="h">Air quality <span>Open-Meteo CAMS</span></div>
+          ${aq ? `<dl class="kv">${aqRow('At the fire', aq[0])}${aqRow('25 km downwind', aq[1])}${aqRow('60 km downwind', aq[2])}</dl>` : `<p class="muted">${extra ? 'Air-quality model unavailable.' : 'Loading…'}</p>`}
+        </div>
+        <div class="tk-sec">
+          <div class="h">Places in the 24 h envelope <span>OpenStreetMap</span></div>
+          <div id="towns-box"><p class="muted">${env ? 'Looking up places…' : 'Waiting for the envelope…'}</p></div>
+        </div>
+        <div class="tk-sec"><p class="note">Sources: NIFC WFIGS, NASA FIRMS VIIRS, Open-Meteo forecast &amp; air quality, NWS, OpenStreetMap. Not for emergency use; for evacuations follow local officials and InciWeb.</p></div>`;
+
+      $('tk-close').onclick = untrack;
+      $('tk-orbit').onclick = toggleOrbit;
+      $('tk-link').onclick = () => { navigator.clipboard?.writeText(location.href).then(() => toast('Link to this fire copied')); };
+      $('tk-sitrep').onclick = () => navigator.clipboard?.writeText(sitrep(f, extra, hs, frpMax)).then(() => toast('SITREP copied to clipboard'));
+      drawHeatChart(hs);
+      if (wx?.hourly) drawWxChart(wx.hourly);
+      if (tracked?._towns && f === tracked) findTownsRender(tracked._towns);
+    }
+    function findTownsRender(hits) {
+      const box = $('towns-box'); if (!box) return;
+      box.innerHTML = hits.length ? `<ul class="towns">${hits.slice(0, 10).map(t => `<li>${esc(t.name)} <span>${t.km.toFixed(1)} km ${t.dir}</span></li>`).join('')}</ul>` : '<p class="muted">No named places inside the 24-hour envelope.</p>';
+    }
+
+    function sitrep(f, extra, hs, frpMax) {
+      const p = f.properties, cur = extra?.wx?.current, env = extra?.env;
+      const lines = [
+        `SITREP · ${p.IncidentName} (${p.UniqueFireIdentifier}) · ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+        `Location: ${[p.POOCounty, (p.POOState || '').replace('US-', '')].filter(Boolean).join(', ')} · ${f.geometry.coordinates[1].toFixed(4)}, ${f.geometry.coordinates[0].toFixed(4)}`,
+        `Size ${num(p.IncidentSize)} ac · ${p.PercentContained ?? '?'}% contained · ${num(p.TotalIncidentPersonnel)} personnel · ${p.IncidentComplexityLevel || 'complexity n/a'}`,
+        `Satellite heat (24 h): ${hs.length} VIIRS detections, peak ${Math.round(frpMax)} MW`,
+        cur ? `Weather now: ${Math.round(cur.temperature_2m)}°F, RH ${Math.round(cur.relative_humidity_2m)}%, wind ${Math.round(cur.wind_speed_10m)} G${Math.round(cur.wind_gusts_10m)} mph from ${compass(cur.wind_direction_10m)} · HDW ${Math.round(hdw(cur.temperature_2m, cur.relative_humidity_2m, cur.wind_speed_10m))}` : 'Weather: unavailable',
+        env?.marks[12] ? `Illustrative free-run envelope: +12 h ${env.marks[12].km.toFixed(1)} km toward ${compass(env.marks[12].dir)}, +24 h ${env.marks[24]?.km.toFixed(1)} km` : '',
+        f._towns?.length ? `Places in 24 h envelope: ${f._towns.slice(0, 8).map(t => `${t.name} (${t.km.toFixed(0)} km ${t.dir})`).join(', ')}` : '',
+        extra?.aq?.[0]?.us_aqi != null ? `Air quality: US AQI ${extra.aq[0].us_aqi} at fire, ${extra.aq[1]?.us_aqi ?? '—'} at 25 km downwind` : '',
+        'Sources: NIFC WFIGS, NASA FIRMS, Open-Meteo, OpenStreetMap. Generated by fifi; not an official product.',
+      ];
+      return lines.filter(Boolean).join('\n');
+    }
+
+    function chartCtx(id) {
+      const cv = $(id); if (!cv) return null;
+      const w = cv.clientWidth, h = cv.clientHeight, d = Math.min(2, devicePixelRatio || 1);
+      cv.width = w * d; cv.height = h * d;
+      const ctx = cv.getContext('2d'); ctx.scale(d, d);
+      return { ctx, w, h };
+    }
+    function drawHeatChart(hs) {
+      const c = chartCtx('ch-heat'); if (!c) return;
+      const { ctx, w, h } = c;
+      const now = Date.now() / 60000, bins = new Array(24).fill(0);
+      for (const p of hs) { const age = (now - p.ts) / 60; if (age >= 0 && age < 24) bins[23 - Math.floor(age)] += p[2]; }
+      const max = Math.max(1, ...bins), bw = w / 24;
+      bins.forEach((v, i) => {
+        const bh = (v / max) * (h - 14);
+        const g = ctx.createLinearGradient(0, h - 12 - bh, 0, h - 12);
+        g.addColorStop(0, '#ffc93c'); g.addColorStop(1, '#c1121f');
+        ctx.fillStyle = v ? g : '#2a1c13';
+        ctx.fillRect(i * bw + 1, h - 12 - Math.max(1, bh), bw - 2, Math.max(1, bh));
+      });
+      ctx.fillStyle = '#6f5c4f'; ctx.font = '9px JetBrains Mono, monospace';
+      ctx.fillText('−24 h', 0, h - 1); ctx.textAlign = 'right'; ctx.fillText('now · fire power per hour', w, h - 1);
+    }
+    function drawWxChart(H) {
+      const c = chartCtx('ch-wx'); if (!c) return;
+      const { ctx, w, h } = c, n = H.time.length, top = 4, bot = h - 14;
+      const maxW = Math.max(30, ...H.wind_gusts_10m);
+      const x = i => (i / (n - 1)) * w, yW = v => bot - (v / maxW) * (bot - top), yR = v => bot - (v / 100) * (bot - top);
+      H.time.forEach((t, i) => { if (H.relative_humidity_2m[i] <= 15 && H.wind_gusts_10m[i] >= 25) { ctx.fillStyle = 'rgba(255,59,48,0.22)'; ctx.fillRect(x(i) - w / n / 2, top, w / n, bot - top); } });
+      const line = (vals, y, col, wdt = 1.6) => { ctx.beginPath(); vals.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))); ctx.strokeStyle = col; ctx.lineWidth = wdt; ctx.stroke(); };
+      line(H.relative_humidity_2m, yR, '#ffc93c', 1.2);
+      line(H.wind_gusts_10m, yW, '#ff8a3d', 1.2);
+      line(H.wind_speed_10m, yW, '#5fd3ff', 1.8);
+      ctx.fillStyle = '#6f5c4f'; ctx.font = '9px JetBrains Mono, monospace';
+      [0, 6, 12, 18].forEach(i => { if (H.time[i]) ctx.fillText(H.time[i].slice(11, 16), x(i) + 1, h - 1); });
+      ctx.textAlign = 'right'; ctx.fillText(`${Math.round(maxW)} mph`, w, top + 8);
+    }
+
+    function untrack() {
+      tracked = null; orbiting = false;
+      document.body.classList.remove('tracking');
+      $('track').classList.remove('show');
+      $('hud-track').classList.remove('show');
+      history.replaceState(null, '', location.pathname);
+      for (const s of ['spread', 'towns', 'focus']) map.getSource(s)?.setData(fc([]));
+      map.easeTo({ pitch: 0, bearing: 0, zoom: Math.min(map.getZoom(), 6), duration: 1200, padding: { top: 0, right: 0, bottom: 0, left: 0 } });
+    }
+    function syncOrbitBtn() { $('tk-orbit')?.classList.toggle('on', orbiting); }
+    function toggleOrbit() {
+      orbiting = !orbiting; syncOrbitBtn();
+      if (!orbiting) return;
+      const spin = () => { if (!orbiting) return; map.easeTo({ bearing: map.getBearing() + 12, duration: 1000, easing: t => t }); map.once('moveend', () => orbiting && spin()); };
+      spin();
+    }
+    function deepLink() {
+      const m = location.hash.match(/fire=([^&]+)/);
+      if (!m) return;
+      const f = incidents.find(x => x.properties.UniqueFireIdentifier === decodeURIComponent(m[1]));
+      if (f) (mapReady ? track(f) : map.once('load', () => track(f)));
+    }
+
+    // ================= 24 h replay =================
+    function drawHistogram() {
+      const c = chartCtx('tl-hist'); if (!c || !(tlMax > tlMin)) return;
+      const { ctx, w, h } = c, B = 96, bins = new Array(B).fill(0);
+      for (const p of hotspots) { const i = Math.min(B - 1, Math.floor((p.ts - tlMin) / (tlMax - tlMin) * B)); if (i >= 0) bins[i]++; }
+      const max = Math.max(1, ...bins), bw = w / B;
+      bins.forEach((v, i) => { const bh = (v / max) * (h - 2); ctx.fillStyle = v ? `rgba(255,${Math.round(90 + 110 * v / max)},31,0.75)` : 'rgba(58,39,27,.5)'; ctx.fillRect(i * bw, h - Math.max(1, bh), Math.max(1, bw - 1), Math.max(1, bh)); });
+    }
+    function setReplay(frac) {
+      if (!(tlMax > tlMin) || !mapReady) return;
+      const t = tlMin + (tlMax - tlMin) * frac;
+      const flt = ['<=', ['get', 'ts'], t];
+      map.setFilter('hotspots-heat', flt); map.setFilter('hotspots-pts', flt);
+      map.setFilter('hotspots-new', ['all', ['<=', ['get', 'ts'], t], ['>', ['get', 'ts'], t - 90]]);
+      const d = new Date(t * 60000);
+      $('tl-time').innerHTML = `${d.toISOString().slice(5, 16).replace('T', ' ')} UTC<small>${hotspots.filter(p => p.ts <= t).length.toLocaleString()} detections so far</small>`;
+      $('tl-live').classList.remove('on');
+    }
+    function goLive() {
+      replaying = false; cancelAnimationFrame(replayRaf);
+      $('tl-play').textContent = '▶ Replay';
+      $('tl-range').value = 1000;
+      if (mapReady) { map.setFilter('hotspots-heat', null); map.setFilter('hotspots-pts', null); map.setFilter('hotspots-new', ['==', ['get', 'ts'], -1]); }
+      $('tl-time').innerHTML = 'LIVE<small>all detections</small>';
+      $('tl-live').classList.add('on');
+    }
+    function play() {
+      if (replaying) { replaying = false; cancelAnimationFrame(replayRaf); $('tl-play').textContent = '▶ Replay'; return; }
+      if (!state.layers.hotspots) setLayer('hotspots', true);
+      replaying = true; $('tl-play').textContent = '❚❚ Pause';
+      let v = +$('tl-range').value >= 1000 ? 0 : +$('tl-range').value;
+      let prev = performance.now();
+      const step = now => {
+        if (!replaying) return;
+        v += (now - prev) / 14000 * 1000; prev = now;           // ~14 s for the full 24 h
+        if (v >= 1000) { goLive(); return; }
+        $('tl-range').value = v; setReplay(v / 1000);
+        replayRaf = requestAnimationFrame(step);
+      };
+      replayRaf = requestAnimationFrame(step);
+    }
+    $('tl-play').onclick = play;
+    $('tl-live').onclick = goLive;
+    $('tl-range').addEventListener('input', e => { replaying = false; cancelAnimationFrame(replayRaf); $('tl-play').textContent = '▶ Replay'; +e.target.value >= 1000 ? goLive() : setReplay(+e.target.value / 1000); });
+    addEventListener('resize', () => { drawHistogram(); });
+
+    // ================= keyboard & mobile =================
+    $('rail-toggle').onclick = () => $('rail').classList.toggle('open');
+    addEventListener('keydown', e => {
+      if (e.target.matches('input, textarea, select')) { if (e.key === 'Escape') e.target.blur(); return; }
+      const k = e.key.toLowerCase();
+      if (k === 'w') setLayer('wind', !state.layers.wind);
+      else if (k === 't') setLayer('terrain', !state.layers.terrain);
+      else if (k === 'o' && tracked) toggleOrbit();
+      else if (k === 'r') play();
+      else if (k === 'escape' && tracked) untrack();
+      else if (k === '/') { e.preventDefault(); $('rail').classList.add('open'); $('search').focus(); }
+    });
+  })();
+  </script>
+</body>
+</html>

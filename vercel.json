@@ -1,5 +1,6 @@
 {
   "rewrites": [
-    { "source": "/extract", "destination": "/extract.html" }
+    { "source": "/extract", "destination": "/extract.html" },
+    { "source": "/ops", "destination": "/ops.html" }
   ]
 }

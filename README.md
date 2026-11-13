@@ -8,6 +8,28 @@ Upload photos, scans or PDFs of ICS-204 forms (typed or handwritten). Google Gem
 
 **Built with:** Python · Flask · Google Gemini API (structured JSON output) · MapLibre GL JS · vanilla JavaScript · Vercel
 
+## Fire Ops (`/ops`)
+
+A full-screen operations view of the same live data, plus the weather that drives fire behavior. Inspired by [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view). Everything is keyless.
+
+| Feature | What it does | Source |
+|---|---|---|
+| **Live wind** | Animated particles show 10 m wind across whatever you're looking at, refetched as you pan | Open-Meteo (13×9 grid per view) |
+| **Click-to-track** | Click any fire: the camera dives in 3D and turns to face downwind, with 5/10/25 km range rings | NIFC WFIGS |
+| **Briefing panel** | Size, containment, personnel, cost; VIIRS heat near the fire (count, total and peak MW, an hourly chart, night detections); 24 h fire-weather chart with critical hours shaded | NIFC, NASA FIRMS, Open-Meteo |
+| **Critical fire weather** | Flags hours with RH ≤ 15% and gusts ≥ 25 mph (Red-Flag-like) or RH ≤ 25% and gusts ≥ 20 mph (elevated) | Open-Meteo hourly |
+| **Spread envelope** | Illustrative +3/6/12/24 h free-run ellipses from forecast wind and humidity. A heuristic for visualization, not a fire-behavior model (no fuels, slope or suppression) | computed in the browser |
+| **Places downwind** | Named towns and villages inside the 24 h envelope, with distance and direction | OpenStreetMap via Photon, with Overpass as a fallback |
+| **Smoke** | US AQI and PM2.5 at the fire and 25 km and 60 km downwind | Open-Meteo air quality (CAMS) |
+| **Fire weather watchlist** | The 40 largest fires under 90% contained, ranked by a surface Hot-Dry-Windy Index (vapor pressure deficit × wind) | Open-Meteo, one batched call |
+| **Red Flag Warnings** | Active Red Flag Warnings and Fire Weather Watches as polygons (zone-based alerts are resolved to zone shapes) | NWS API |
+| **Radar, infrared, lightning** | MRMS radar, GOES longwave infrared and lightning density overlays | NOAA nowCOAST WMS |
+| **3D terrain** | Hillshade plus terrain with 1.5× exaggeration | Mapzen terrain tiles on AWS Open Data |
+| **24 h replay** | Scrub or play the last 24 hours of VIIRS detections; the newest 90 minutes flare as they appear | NASA FIRMS (via `/api/hotspots`) |
+| **SITREP & links** | Copy a plain-text situation report, or a link that reopens the tracked fire (`/ops#fire=<id>`) | — |
+
+Keys: **W** wind · **T** terrain · **R** replay · **O** orbit the tracked fire · **/** search · **Esc** stop tracking.
+
 ## Live fire map
 
 The landing page (`/`) shows a live operating picture, built entirely from public, keyless feeds:

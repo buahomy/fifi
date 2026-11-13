@@ -106,6 +106,11 @@ def extract_page():
     return send_from_directory(PUBLIC, "extract.html")
 
 
+@app.get("/ops")
+def ops_page():
+    return send_from_directory(PUBLIC, "ops.html")
+
+
 # NASA FIRMS satellite hotspots: VIIRS on NOAA-20 and NOAA-21, trailing 24 h, US + Hawaii.
 # These public keyless CSVs don't allow browser cross-origin requests, so the server relays
 # them in compact form. (Suomi NPP is left out: NASA stopped delivering it on 2026-11-02.)
